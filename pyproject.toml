@@ -1,0 +1,19 @@
+[project]
+name = "jello"
+version = "0.1.0"
+description = "One CLI for the claude, codex, and Prime Agent account profiles"
+readme = "README.md"
+authors = [
+    { name = "PriyanshuUpadhyay" }
+]
+requires-python = ">=3.10"
+# Standard library only: jello runs from a shell hook and a wrapper on every prompt, so it
+# must not pay for an import tree or break when an environment is half-installed.
+dependencies = []
+
+[project.scripts]
+jello = "jello.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.8,<0.13.0"]
+build-backend = "uv_build"

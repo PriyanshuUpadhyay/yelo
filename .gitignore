@@ -1,0 +1,12 @@
+.herdr/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# `uv run` writes this, and jello has no dependencies for it to pin.
+uv.lock
