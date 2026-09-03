@@ -153,11 +153,12 @@ def is_jello_group(group):
 
 
 def is_dotfiles_group(group):
-    """A group whose command resolves into ~/dotfiles -- reached directly or, as on this
-    machine, through the stow symlink at ~/.claude/hooks/session-profile-map.sh."""
+    """A group still wired to the predecessor hook. Only that command counts: the other
+    dotfiles hooks in these events (housekeeping, guards) stay in dotfiles by design, and on
+    this machine every one of them is a stow symlink into it."""
     for command in group_commands(group):
         word = os.path.expanduser(os.path.expandvars(first_word(command)))
-        if word and into_dotfiles(word):
+        if os.path.basename(word) == DOTFILES_HOOK:
             return True
     return False
 

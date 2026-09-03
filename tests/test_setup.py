@@ -273,6 +273,31 @@ def test_setup_respects_dotfiles_ownership(bench):
     assert bench.rows(bench.run("setup"))["shell"] == "unchanged"
 
 
+def test_other_dotfiles_hooks_do_not_own_the_events(bench):
+    """Only the predecessor hook makes an event dotfiles-owned. The housekeeping and guard
+    hooks stay in dotfiles after the cutover, and every one of them is a stow symlink into it
+    on this machine; they must not keep `jello setup claude-hooks` from applying."""
+    scripts_dir = bench.home / ".claude" / "scripts"
+    scripts_dir.mkdir(parents=True)
+    real = bench.dotfiles / "home" / ".claude" / "scripts" / "claude-housekeeping.sh"
+    real.parent.mkdir(parents=True, exist_ok=True)
+    real.write_text("#!/bin/sh\n")
+    (scripts_dir / "claude-housekeeping.sh").symlink_to(real)
+    data = json.loads(json.dumps(SEEDED_SETTINGS))
+    for event in setup.HOOK_EVENTS:
+        data["hooks"][event][0]["hooks"].append(
+            {"type": "command", "command": "$HOME/.claude/scripts/claude-housekeeping.sh"}
+        )
+    bench.seed_settings(data)
+    install_hud_targets(bench.home)
+
+    result = bench.run("setup", "claude-hooks")
+    assert result.returncode == 0, result.stderr
+    assert bench.rows(result)["claude-hooks"] == "changed"
+    for event in setup.HOOK_EVENTS:
+        assert any(setup.is_jello_group(group) for group in bench.parsed()["hooks"][event])
+
+
 def test_settings_symlinked_into_dotfiles_is_owned(bench):
     """Review finding F2: the settings target itself can be dotfiles', not only the hook
     commands inside it. An atomic write would replace the link with a regular file and
