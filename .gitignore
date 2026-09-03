@@ -8,5 +8,8 @@ __pycache__/
 dist/
 build/
 
+# The Swift package's build output; `jello hud install` rebuilds it on demand.
+apps/UsageHUD/.build/
+
 # `uv run` writes this, and jello has no dependencies for it to pin.
 uv.lock

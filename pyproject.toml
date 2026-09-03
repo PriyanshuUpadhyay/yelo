@@ -1,6 +1,6 @@
 [project]
 name = "jello"
-version = "0.1.0"
+version = "0.2.0"
 description = "One CLI for the claude, codex, and Prime Agent account profiles"
 readme = "README.md"
 authors = [

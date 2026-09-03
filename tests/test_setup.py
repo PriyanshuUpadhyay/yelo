@@ -9,6 +9,7 @@ by a symlink the test made rather than by whatever this machine happens to have.
 import hashlib
 import json
 import os
+import plistlib
 import stat
 import subprocess
 import sys
@@ -35,6 +36,21 @@ SEEDED_SETTINGS = {
     },
     "statusLine": {"type": "command", "command": "statusline.sh"},
 }
+
+
+HUD_LABEL = "io.github.priyanshuupadhyay.jello-hud"
+
+
+def install_hud_targets(home):
+    """The two targets `jello doctor` reads for its `hud` row. A HOME without them is
+    matrix M4 row 4 -- `hud missing`, exit 1 -- which would drown out what the tests below
+    are actually about: the setup steps."""
+    agents = home / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True, exist_ok=True)
+    (agents / (HUD_LABEL + ".plist")).write_bytes(plistlib.dumps({"Label": HUD_LABEL}))
+    macos = home / "Applications" / "UsageHUD.app" / "Contents" / "MacOS"
+    macos.mkdir(parents=True, exist_ok=True)
+    (macos / "UsageHUD").write_text("binary\n")
 
 
 def env_for(home, dotfiles, **overrides):
@@ -232,6 +248,8 @@ def test_setup_respects_dotfiles_ownership(bench):
     real_profiles = bench.dotfiles / "home" / ".claude" / ".profiles"
     real_profiles.mkdir(parents=True)
     bench.profiles.symlink_to(real_profiles)
+    # The HUD is jello's here, so the two HUD rows stay out of the exit code below.
+    install_hud_targets(bench.home)
 
     before = bench.digest()
     result = bench.run("setup")
@@ -246,6 +264,9 @@ def test_setup_respects_dotfiles_ownership(bench):
     assert doctor.returncode == 0, "owned-by-dotfiles is not a fault"
     assert "claude-hooks\towned-by-dotfiles" in doctor.stdout
     assert "profiles\towned-by-dotfiles" in doctor.stdout
+    # What earns the exit 0: nothing is `missing`, so the two HUD rows must read `ok`.
+    assert bench.rows(doctor)["usage"] == "ok"
+    assert bench.rows(doctor)["hud"] == "ok"
 
     # Only the shell step, which dotfiles does not own, may have changed anything.
     assert bench.digest() != before

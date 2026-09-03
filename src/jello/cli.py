@@ -1,4 +1,4 @@
-"""The `jello` root command: one parser, five groups, one error shape.
+"""The `jello` root command: one parser, seven groups, one error shape.
 
 Each group owns its own subcommand and registers it here. An ImportError raised while a
 group loads is a broken install, so it surfaces as a traceback rather than as a command
@@ -8,11 +8,12 @@ that quietly goes missing.
 import argparse
 import sys
 
-from . import __version__, doctor, resume, setup, shell
+from . import __version__, doctor, hud, resume, setup, shell
 from .profile import commands as profile_commands
+from .usage import commands as usage_commands
 
 # The order is the order in --help.
-GROUPS = (profile_commands, resume, shell, setup, doctor)
+GROUPS = (profile_commands, usage_commands, resume, shell, setup, doctor, hud)
 
 
 def fail(command, message, path=None):

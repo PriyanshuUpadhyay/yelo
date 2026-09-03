@@ -14,13 +14,13 @@ Subcommands (wired by jello.profile.commands as `jello profile ...`):
   sessions --cli codex [--all] [--limit N] [--json]     recent sessions, newest first, each
                                                         with the account that owns it
 
---usage joins the Usage HUD rows (usage-hud-data --json), falling back to
-each account's own usage cache; it costs a subprocess, so the resolve hot path
-never asks for it.
+--usage joins the Usage HUD rows, which `jello.profile.commands` reads in process
+from `jello.usage.snapshot` and passes in, falling back to each account's own usage
+cache; it costs a pass over the cache files, so the resolve hot path never asks for it.
 
 AGENT_PROFILES_CLAUDE_ROOT, AGENT_PROFILES_CODEX_GLOB_ROOT,
-AGENT_PROFILES_PRIME_GLOB_ROOT, AGENT_PROFILES_USAGE_DATA, and AGENT_PROFILES_SECURITY_BIN
-relocate the roots, the usage data feed, and the Keychain probe for tests only.
+AGENT_PROFILES_PRIME_GLOB_ROOT, and AGENT_PROFILES_SECURITY_BIN relocate the roots and
+the Keychain probe for tests only.
 """
 
 import base64
@@ -35,7 +35,6 @@ import sys
 import time
 
 HOME = os.path.expanduser("~")
-USAGE_DATA_TIMEOUT_SECONDS = 10
 KEYCHAIN_TIMEOUT_SECONDS = 10
 CODEX_BASE = ".codex"
 CODEX_PREFIX = ".codex-"
@@ -407,19 +406,45 @@ def resolve(cli, rows, query):
     raise ResolveError(f"{cli}: no profile matches {query!r}", 1)
 
 
+def security_bin():
+    """The Keychain CLI, pinned by AGENT_PROFILES_SECURITY_BIN for tests only."""
+    return os.environ.get("AGENT_PROFILES_SECURITY_BIN") or "security"
+
+
+def keychain_service(name):
+    """(service, account) for one claude profile's credential item — the ONE derivation.
+
+    Claude Code stores each account's OAuth blob under a service that carries the first
+    eight hex of sha256 of that account's identity path, so no account rides the bare
+    service and a rename can never hand one account another's credentials. The sign-in
+    probe here and the token read in jello.usage.fetch both key off this, so the two can
+    never drift apart.
+    """
+    identity = os.path.join(HOME, f".claude-{name}")
+    service = "Claude Code-credentials-" + hashlib.sha256(identity.encode()).hexdigest()[:8]
+    return service, os.environ.get("USER") or getpass.getuser()
+
+
+def hud_label(cli, row):
+    """The Usage HUD's label for one account: `cl·NAME`, `cx`, or `cx·NAME`. The codex base
+    home names itself through profile-label, and reports as the anonymous `cx` until it has
+    one."""
+    if cli == "claude":
+        return f"cl·{row['name']}"
+    name = row.get("usage_name") if cli == "prime" else row.get("name")
+    return f"cx·{name}" if name else "cx"
+
+
 def claude_signed_in(name):
     """Does this account hold credentials? Claude keeps them in the Keychain, keyed by the
     identity path, so the directory says nothing. This is a METADATA probe — the item's
     existence, by return code. It never passes -w, so no secret is read, printed, or logged,
     and it does not raise the access prompt that reading the password would."""
-    identity = os.path.join(HOME, f".claude-{name}")
-    service = "Claude Code-credentials-" + hashlib.sha256(identity.encode()).hexdigest()[:8]
     try:
-        user = os.environ.get("USER") or getpass.getuser()
+        service, user = keychain_service(name)
     except OSError:
         return False
-    command = [os.environ.get("AGENT_PROFILES_SECURITY_BIN") or "security",
-               "find-generic-password", "-s", service, "-a", user]
+    command = [security_bin(), "find-generic-password", "-s", service, "-a", user]
     try:
         result = subprocess.run(command, capture_output=True, text=True,
                                 timeout=KEYCHAIN_TIMEOUT_SECONDS)
@@ -434,28 +459,6 @@ def add_signed_in(cli, rows):
         for row in rows:
             row["signed_in"] = claude_signed_in(row["name"])
     return rows
-
-
-def usage_data_rows():
-    usage_data = os.environ.get("AGENT_PROFILES_USAGE_DATA") or os.path.join(
-        HOME, ".local/bin/usage-hud-data"
-    )
-    if not os.access(usage_data, os.X_OK):
-        return None
-    try:
-        result = subprocess.run(
-            [usage_data, "--json"], capture_output=True, text=True, timeout=USAGE_DATA_TIMEOUT_SECONDS
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    rows = None
-    try:
-        rows = json.loads(result.stdout)
-    except ValueError:
-        return None
-    return rows if isinstance(rows, list) else None
 
 
 def usage_data_labels(cli, row):
@@ -581,10 +584,14 @@ def urgency(windows):
     return best
 
 
-def add_usage(cli, rows):
+def add_usage(cli, rows, usage_rows):
     """Adds `usage` (display text), `remaining` (min percent left, None = unknown), and
-    `urgency` (see urgency(); None when remaining is unknown)."""
-    usage_data = usage_data_rows()
+    `urgency` (see urgency(); None when remaining is unknown).
+
+    `usage_rows` is the Usage HUD snapshot the caller took (jello.profile.commands reads it
+    from jello.usage.snapshot), or None when no snapshot could be taken at all — this
+    module never reaches for it itself, so core stays free of any jello.usage import."""
+    usage_data = usage_rows
     for row in rows:
         if cli == "prime" and not row.get("usage_dir"):
             row["usage"] = "quota account not found"
@@ -661,10 +668,10 @@ def session_columns(rows, everywhere):
     return header, body
 
 
-def command_list(args):
+def command_list(args, usage_rows=None):
     rows = add_signed_in(args.cli, rows_for(args.cli))
     if args.usage:
-        add_usage(args.cli, rows)
+        add_usage(args.cli, rows, usage_rows)
     if args.json:
         print(json.dumps(rows, ensure_ascii=False))
         return 0
@@ -696,12 +703,12 @@ def command_sessions(args):
     return 0
 
 
-def command_menu(args):
+def command_menu(args, usage_rows=None):
     rows = rows_for(args.cli)
     if not rows:
         print(f"{args.cli}: no profiles found", file=sys.stderr)
         return 1
-    add_usage(args.cli, add_signed_in(args.cli, rows))
+    add_usage(args.cli, add_signed_in(args.cli, rows), usage_rows)
     _, body = columns(args.cli, rows, True)
     for index, (row, line) in enumerate(zip(rows, render([""] * len(body[0]), body)[1:]), start=1):
         print("\t".join([str(index), row["name"] or "", row["dir"], line]))
@@ -727,7 +734,7 @@ def command_resolve(args):
     return 0
 
 
-def command_pick(args):
+def command_pick(args, usage_rows=None):
     """Highest urgency wins — the account whose window is closest to wasting the most
     capacity — with most-remaining as tiebreak; ties keep the first account in list order.
     An account with any window exhausted loses to every usable one. A signed-in account
@@ -738,7 +745,7 @@ def command_pick(args):
         print(f"{args.cli}: no signed-in account to pick from", file=sys.stderr)
         return 1
     if len(rows) > 1:
-        add_usage(args.cli, rows)
+        add_usage(args.cli, rows, usage_rows)
         judged = [row for row in rows if row.get("remaining") is not None]
         if not judged:
             print(f"{args.cli}: no usage data to pick an account from", file=sys.stderr)

@@ -1,5 +1,6 @@
-"""C01 (list matches the reference goldens), C02 (resolve exit codes), C19 (stdlib only),
-and law L3 (the row count is the layout census)."""
+"""C01 (list matches the reference goldens), C02 (resolve exit codes), C20 (stdlib and
+public APIs only), C12 and C13 (the usage rows are read in process), and law L3 (the row
+count is the layout census)."""
 
 import ast
 import glob
@@ -7,12 +8,15 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
+import time
 
 import pytest
 
 import jello as jello_pkg
-from conftest import build_census_home, fixture_env, run_jello
+from conftest import (build_census_home, build_usage_home, fixture_env, run_jello,
+                      usage_env)
 
 ROOT = pathlib.Path(__file__).parent.parent
 GOLDEN = ROOT / "tests" / "golden"
@@ -105,6 +109,28 @@ def imported_roots(path):
             yield (node.module or "").split(".")[0]
 
 
+def private_attributes(path):
+    """Attribute reads that reach into another object's privates. `self._x` inside a class
+    is a module's own business; anything else is a standard-library internal."""
+    for node in ast.walk(ast.parse(path.read_text())):
+        if not isinstance(node, ast.Attribute) or not node.attr.startswith("_"):
+            continue
+        if node.attr.startswith("__") and node.attr.endswith("__"):
+            continue
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            continue
+        yield node.attr
+
+
+def test_public_apis_only():
+    """R1: product code uses the standard library's public surface only, so an interpreter
+    upgrade cannot take a private attribute out from under jello."""
+    private = {str(path.relative_to(SOURCE)): sorted(set(private_attributes(path)))
+               for path in sorted(SOURCE.rglob("*.py"))
+               if list(private_attributes(path))}
+    assert private == {}
+
+
 def test_stdlib_only():
     """R1: jello runs on every prompt through a shell hook, so it may not import anything
     that is not already in the interpreter."""
@@ -122,8 +148,94 @@ def test_stdlib_only():
 def test_help_lists_every_group(jello):
     result = jello("--help")
     assert result.returncode == 0
-    for group in ("profile", "resume", "shell-init", "setup", "doctor"):
+    for group in ("profile", "usage", "resume", "shell-init", "setup", "doctor", "hud"):
         assert group in result.stdout
+
+
+ENUMERATORS = {"glob", "listdir", "scandir", "iterdir"}
+CENSUS_MARKERS = (".profiles", ".codex", ".prime")
+
+
+def enumeration_calls(tree):
+    """Every call to one of the four ways to enumerate a directory, whichever spelling."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        name = function.attr if isinstance(function, ast.Attribute) else getattr(
+            function, "id", None)
+        if name in ENUMERATORS:
+            yield node, name
+
+
+def test_usage_enumerates_only_through_core():
+    """Law L2: one census. jello.usage never walks the layout itself — it asks core for the
+    rows — so no enumeration inside it may name .profiles, .codex, or .prime. The one
+    exception is the rollout scan INSIDE a single codex home whose path core already handed
+    over: a file scan under a known directory, not a discovery of accounts."""
+    scans = []
+    for path in sorted((SOURCE / "usage").glob("*.py")):
+        tree = ast.parse(path.read_text())
+        assigned = {target.id: ast.unparse(node.value)
+                    for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                    for target in node.targets if isinstance(target, ast.Name)}
+        for node, name in enumeration_calls(tree):
+            # A pattern is usually built one line above the call, so the name it was bound
+            # to is resolved back to the expression that built it.
+            argument = " ".join(
+                [ast.unparse(item) for item in node.args]
+                + [assigned.get(item.id, "") for item in node.args
+                   if isinstance(item, ast.Name)])
+            where = f"{path.name}:{node.lineno} {name}({argument})"
+            for marker in CENSUS_MARKERS:
+                assert marker not in argument, f"{where} enumerates the {marker} layout"
+            scans.append((where, argument))
+    assert len(scans) == 1, scans
+    assert scans[0][1].endswith("'rollout-*.jsonl')"), scans[0]
+
+
+def test_import_direction(jello):
+    """Law L2: core is the census, so it may not reach back into the modules that read it.
+    Importing core must not drag in jello.usage or jello.hud."""
+    result = run_jello(["--version"], fixture_env(jello.home))
+    assert result.returncode == 0
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, jello.profile.core; "
+         "print(sorted(m for m in sys.modules "
+         "if m.startswith('jello.usage') or m == 'jello.hud'))"],
+        capture_output=True, text=True,
+        env=os.environ | {"PYTHONPATH": str(ROOT / "src")},
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout.strip() == "[]"
+
+
+def test_core_no_longer_shells_out_for_usage(jello):
+    """R5: the subprocess stand-in is gone, name and knob together."""
+    from jello.profile import core
+
+    assert not hasattr(core, "usage_data_rows")
+    for path in sorted(SOURCE.rglob("*.py")):
+        assert "AGENT_PROFILES_USAGE_DATA" not in path.read_text(), path
+
+
+def test_list_usage_in_process(tmp_path):
+    """C13: the usage column and the picker read the cache files themselves, with no
+    usage-hud-data anywhere on PATH and no override environment variable."""
+    now = int(time.time())
+    home = build_usage_home(tmp_path / "home", now)
+    env = usage_env(home)
+    env["PATH"] = "/nonexistent"
+    listing = run_jello(["profile", "list", "--cli", "claude", "--usage"], env)
+    assert listing.returncode == 0, listing.stderr
+    assert "5h 57% left" in listing.stdout, listing.stdout
+    assert "no data" in listing.stdout, "the profile with no cache has no usage rows"
+
+    picked = run_jello(["profile", "pick", "--cli", "claude", "--json"], env)
+    assert picked.returncode == 0, picked.stderr
+    assert json.loads(picked.stdout)["name"] == "pri", (
+        "pri is 21 minutes from wasting 57% of its 5h window; work has a whole one ahead")
 
 
 def test_version_is_the_package_version(jello):

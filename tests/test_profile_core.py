@@ -5,6 +5,8 @@ Only two things changed: the module is imported as `jello.profile.core` instead 
 loaded from a file path, and the subprocess runs `jello profile ...` instead of the script.
 Every assertion is the original one.
 """
+import getpass
+import hashlib
 import json
 import os
 import pathlib
@@ -12,11 +14,30 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from jello.profile import core as agent_profiles
+from jello.usage import fetch as usage_fetch
 
 JELLO = [sys.executable, "-m", "jello.cli", "profile"]
+SECURITY_STUB = """#!/usr/bin/env python3
+import json, os, sys
+
+argv = sys.argv[1:]
+service = None
+for index, item in enumerate(argv):
+    if item == "-s" and index + 1 < len(argv):
+        service = argv[index + 1]
+with open(os.environ["FAKE_KEYCHAIN"], encoding="utf-8") as handle:
+    items = json.load(handle)
+blob = items.get(service)
+if blob is None:
+    sys.exit(1)
+if "-w" in argv:
+    sys.stdout.write(blob)
+sys.exit(0)
+"""
 
 
 class ParseResetHours(unittest.TestCase):
@@ -49,18 +70,64 @@ class Urgency(unittest.TestCase):
         self.assertAlmostEqual(agent_profiles.urgency({"5h": (0.0, 0.001)}), 1 / 0.02)
 
 
+class KeychainService(unittest.TestCase):
+    """C12: one derivation of the Keychain item, shared by the sign-in probe and the token
+    read. The rule is written out here rather than imported, so the code has to agree with
+    it and not merely with itself."""
+
+    def expected(self, name):
+        identity = os.path.join(agent_profiles.HOME, f".claude-{name}")
+        digest = hashlib.sha256(identity.encode()).hexdigest()[:8]
+        return "Claude Code-credentials-" + digest
+
+    def test_service_is_the_identity_path_digest(self):
+        service, user = agent_profiles.keychain_service("pri")
+        self.assertEqual(service, self.expected("pri"))
+        self.assertEqual(user, os.environ.get("USER") or getpass.getuser())
+        self.assertNotEqual(agent_profiles.keychain_service("work")[0], service)
+
+    def test_keychain_service_shared(self):
+        """A fake `security` that knows only the derived item satisfies both callers, so
+        neither can be keying off a derivation of its own."""
+        with tempfile.TemporaryDirectory() as tmp:
+            items = pathlib.Path(tmp, "keychain.json")
+            items.write_text(json.dumps({
+                self.expected("pri"): json.dumps({"claudeAiOauth": {"accessToken": "t-1"}}),
+            }))
+            security = pathlib.Path(tmp, "security")
+            security.write_text(SECURITY_STUB)
+            security.chmod(security.stat().st_mode | stat.S_IXUSR)
+            os.environ["AGENT_PROFILES_SECURITY_BIN"] = str(security)
+            os.environ["FAKE_KEYCHAIN"] = str(items)
+            try:
+                self.assertTrue(agent_profiles.claude_signed_in("pri"))
+                self.assertEqual(usage_fetch.read_keychain_token("pri"), "t-1")
+                self.assertFalse(agent_profiles.claude_signed_in("work"))
+                self.assertIsNone(usage_fetch.read_keychain_token("work"))
+            finally:
+                del os.environ["AGENT_PROFILES_SECURITY_BIN"]
+                del os.environ["FAKE_KEYCHAIN"]
+
+
 class Pick(unittest.TestCase):
-    def run_pick(self, usage_rows, names):
+    """The picker's own cases, unchanged in what they assert. The rows used to come from a
+    fake usage-hud-data on PATH; they now come from the cache files the snapshot reads, so
+    the reset texts are written as epochs that render back to the same durations."""
+
+    def run_pick(self, caches, names):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp, "profiles")
             for name in names:
                 root.joinpath(name).mkdir(parents=True)
-            usage_data = pathlib.Path(tmp, "usage-data")
-            usage_data.write_text("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" % json.dumps(usage_rows))
-            usage_data.chmod(usage_data.stat().st_mode | stat.S_IXUSR)
+            now = int(time.time())
+            for name, windows in caches.items():
+                document = {"ts": now, "fetched_at": now, "source": "api"}
+                for key, (pct, offset) in windows.items():
+                    document[key] = {"used_percentage": pct, "resets_at": now + offset}
+                root.joinpath(name, ".usage-api-cache.json").write_text(json.dumps(document))
             env = os.environ | {
+                "HOME": tmp,
                 "AGENT_PROFILES_CLAUDE_ROOT": str(root),
-                "AGENT_PROFILES_USAGE_DATA": str(usage_data),
                 "AGENT_PROFILES_SECURITY_BIN": "/usr/bin/true",
             }
             result = subprocess.run(
@@ -70,25 +137,18 @@ class Pick(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(result.stdout)
 
-    @staticmethod
-    def row(name, window, pct, reset):
-        return {"label": f"cl·{name}", "provider": "claude", "window": window,
-                "state": "ok", "pct": pct, "reset": reset}
-
     def test_expiring_window_beats_fuller_account(self):
-        picked = self.run_pick([
-            self.row("a", "5h", 50, "30m"),
-            self.row("b", "5h", 0, "4h50m"),
-        ], ["a", "b"])
+        picked = self.run_pick({
+            "a": {"five_hour": (50, 1830)},        # 30m left
+            "b": {"five_hour": (0, 17430)},        # 4h50m left
+        }, ["a", "b"])
         self.assertEqual(picked["name"], "a")
 
     def test_exhausted_window_loses_to_usable_account(self):
-        picked = self.run_pick([
-            self.row("a", "5h", 20, "10m"),
-            self.row("a", "7d", 100, "2d0h"),
-            self.row("b", "5h", 40, "4h0m"),
-            self.row("b", "7d", 40, "5d0h"),
-        ], ["a", "b"])
+        picked = self.run_pick({
+            "a": {"five_hour": (20, 630), "seven_day": (100, 174630)},
+            "b": {"five_hour": (40, 14430), "seven_day": (40, 432630)},
+        }, ["a", "b"])
         self.assertEqual(picked["name"], "b")
 
 

@@ -8,8 +8,31 @@ implicit process directory the zsh helper relied on.
 import os
 
 from . import core, create
+from ..usage import snapshot
 
 CLI_CHOICES = ("claude", "codex", "prime")
+
+
+def usage_rows():
+    """The Usage HUD snapshot the usage column and the picker join against, read in process
+    from the same cache files the HUD shows. A snapshot that cannot be taken at all leaves
+    the column on its per-account cache fallback rather than failing the command."""
+    try:
+        return snapshot.snapshot_rows(core.HOME)
+    except snapshot.SnapshotError:
+        return None
+
+
+def command_list(args):
+    return core.command_list(args, usage_rows() if args.usage else None)
+
+
+def command_menu(args):
+    return core.command_menu(args, usage_rows())
+
+
+def command_pick(args):
+    return core.command_pick(args, usage_rows())
 
 
 def command_sessions(args):
@@ -38,10 +61,10 @@ def register(subparsers):
         sub.set_defaults(handler=handler)
         return sub
 
-    listing = add("list", core.command_list)
+    listing = add("list", command_list)
     listing.add_argument("--usage", action="store_true")
     listing.add_argument("--json", action="store_true")
-    add("menu", core.command_menu)
+    add("menu", command_menu)
     # Sessions are a codex-only concept, so this one does not take the shared --cli choices.
     sessions = group.add_parser("sessions")
     sessions.add_argument("--cli", choices=("codex",), required=True)
@@ -53,7 +76,7 @@ def register(subparsers):
     resolving = add("resolve", core.command_resolve)
     resolving.add_argument("query")
     resolving.add_argument("--json", action="store_true")
-    add("pick", core.command_pick).add_argument("--json", action="store_true")
+    add("pick", command_pick).add_argument("--json", action="store_true")
     creating = add("create", create.command_create)
     # The wrappers send `create --cli CLI [options] -- NAME`, so a name that starts with a
     # dash reaches create.py and gets the shell's invalid-name refusal. An absent name is

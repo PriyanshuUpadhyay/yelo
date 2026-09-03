@@ -1,0 +1,72 @@
+[
+  {
+    "label": "cl·pri",
+    "provider": "claude",
+    "window": "5h",
+    "state": "ok",
+    "pct": 43,
+    "reset": "21m",
+    "asOf": 1788354078,
+    "seenAt": 1788354138,
+    "active": true,
+    "source": "statusline",
+    "canFetch": true
+  },
+  {
+    "label": "cl·pri",
+    "provider": "claude",
+    "window": "7d",
+    "state": "ok",
+    "pct": 12,
+    "reset": "3d1h",
+    "asOf": 1788354048,
+    "seenAt": 1788354048,
+    "active": true,
+    "source": "api",
+    "canFetch": true
+  },
+  {
+    "label": "cl·pri",
+    "provider": "claude",
+    "window": "fb",
+    "state": "ok",
+    "pct": 5,
+    "reset": "3d1h",
+    "asOf": 1788354018,
+    "seenAt": 1788354018,
+    "active": true,
+    "source": "api",
+    "canFetch": true
+  },
+  {
+    "label": "cl·work",
+    "provider": "claude",
+    "state": "offline",
+    "reason": "no data",
+    "canFetch": true
+  },
+  {
+    "label": "cx",
+    "provider": "codex",
+    "window": "7d",
+    "state": "ok",
+    "pct": 30,
+    "reset": "1d2h",
+    "asOf": 1788354108,
+    "seenAt": 1788354108,
+    "source": "api",
+    "canFetch": false
+  },
+  {
+    "label": "cx·alt",
+    "provider": "codex",
+    "window": "7d",
+    "state": "ok",
+    "pct": 18,
+    "reset": "1d2h",
+    "asOf": 1788354168,
+    "seenAt": 1788354168,
+    "source": "rollout",
+    "canFetch": false
+  }
+]

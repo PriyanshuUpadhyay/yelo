@@ -1,22 +1,24 @@
 """`jello doctor`: what is installed, judged from the filesystem alone.
 
-One row per setup step, `step<TAB>state<TAB>detail`, where the state is `ok`, `missing`, or
-`owned-by-dotfiles`. Exit 1 only when a step is `missing`: `owned-by-dotfiles` is a correct
-answer during the cutover, not a fault.
+One row per setup step and then per HUD check, `step<TAB>state<TAB>detail`, where the
+state is `ok`, `missing`, or `owned-by-dotfiles`. Exit 1 only when a row is `missing`:
+`owned-by-dotfiles` is a correct answer during the cutover, not a fault.
 
 Doctor calls only the `check` half of each step, so it never creates, writes, or repairs
 anything (law L4). The verdict pattern is stow-drift-check.py's: ask the filesystem where
-the target actually points, never a marker file or setup's own record of what it did.
+the target actually points, never a marker file or setup's own record of what it did. The
+`usage` and `hud` rows follow the same rule and ask launchd nothing: whether the job is up
+right now is a different question from what is installed.
 """
 
 import json
 import os
 
-from . import setup
+from . import hud, setup
 
 
 def rows(home):
-    return [(step.name, *step.check(home)) for step in setup.STEPS]
+    return [(step.name, *step.check(home)) for step in (*setup.STEPS, *hud.CHECKS)]
 
 
 def run(args):

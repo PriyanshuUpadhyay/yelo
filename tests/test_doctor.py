@@ -1,24 +1,45 @@
-"""C18 and law L4: `jello doctor` reports matrix M4's verdict and writes nothing.
+"""C19 and law L4: `jello doctor` reports every verdict and writes nothing.
 
-The doctor column of M4 is the whole table here, one case per target state. Two properties
-are asserted on every case: the HOME tree is byte-identical before and after (doctor may
-never repair, create, or touch anything), and the exit code is 1 only when some step is
-`missing` -- `owned-by-dotfiles` is the correct answer during the cutover, not a fault.
+Two tables live here. The first is one case per setup-step state; the second is matrix M4,
+the `usage` and `hud` rows the cutover moves through. Two properties are asserted on every
+case of both: the HOME tree is byte-identical before and after (doctor may never repair,
+create, or touch anything), and the exit code is 1 only when some row is `missing` --
+`owned-by-dotfiles` is the correct answer during the cutover, not a fault.
+
+The HUD rows are read off the filesystem like every other row. Doctor never asks launchd
+anything, so no test here needs a fake `launchctl`: whether the job is up right now is a
+different question from what is installed.
 """
 
 import json
 import os
+import plistlib
 import stat
 
 import pytest
 
-from jello import setup
+from jello import hud, setup
 from test_setup import SEEDED_SETTINGS, bench, tree_digest  # noqa: F401 - shared fixture
+
+HUD_LABEL = "io.github.priyanshuupadhyay.jello-hud"
+LEGACY_PLIST = "work.example.usage-hud.plist"
+USAGE_LINKS = ("usage-hud-data", "usage-hud-fetch")
 
 
 def verdicts(result):
     return {line.split("\t")[0]: line.split("\t")[1]
             for line in result.stdout.splitlines() if "\t" in line}
+
+
+def install_hud_targets(bench):
+    """The two HUD targets in their `ok` shape. The setup-step table below is about the
+    setup steps, so the HUD rows are held constant across it; matrix M4 varies them."""
+    agents = bench.home / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True, exist_ok=True)
+    (agents / (HUD_LABEL + ".plist")).write_bytes(plistlib.dumps({"Label": HUD_LABEL}))
+    macos = bench.home / "Applications" / "UsageHUD.app" / "Contents" / "MacOS"
+    macos.mkdir(parents=True, exist_ok=True)
+    (macos / "UsageHUD").write_text("binary\n")
 
 
 # --- the states of matrix M4, one arranger each ------------------------------------------
@@ -118,7 +139,8 @@ STATES = (
 
 @pytest.mark.parametrize("arrange", STATES, ids=[fn.__name__[6:] for fn in STATES])
 def test_doctor_matrix(bench, arrange):
-    expected = arrange(bench)
+    install_hud_targets(bench)
+    expected = {**arrange(bench), "usage": "ok", "hud": "ok"}
     before = bench.digest()
 
     result = bench.run("doctor")
@@ -134,11 +156,14 @@ def test_doctor_matrix(bench, arrange):
 
 def test_doctor_json_matches_the_table(bench):
     assert bench.run("setup").returncode == 0
+    install_hud_targets(bench)
     before = bench.digest()
     result = bench.run("doctor", "--json")
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert [row["step"] for row in report] == list(setup.STEP_NAMES)
+    assert [row["step"] for row in report] == [
+        *setup.STEP_NAMES, *(step.name for step in hud.CHECKS)
+    ]
     assert all(row["state"] == "ok" for row in report)
     assert bench.digest() == before
 
@@ -149,3 +174,84 @@ def test_doctor_never_creates_the_cache_directory(bench):
     result = bench.run("doctor")
     assert result.returncode == 1
     assert not (bench.home / ".cache").exists()
+
+
+# --- matrix M4: the usage and hud rows through the cutover --------------------------------
+
+def hud_dotfiles(bench):
+    """A dotfiles tree under the temporary HOME, holding the two targets the cutover has
+    not retired yet: the old `usage-hud-*` commands and the old LaunchAgent."""
+    root = bench.home / "dotfiles"
+    binaries = root / "home" / ".local" / "bin"
+    agents = root / "home" / "Library" / "LaunchAgents"
+    binaries.mkdir(parents=True, exist_ok=True)
+    agents.mkdir(parents=True, exist_ok=True)
+    for name in USAGE_LINKS:
+        (binaries / name).write_text("#!/bin/sh\n")
+    (agents / LEGACY_PLIST).write_bytes(plistlib.dumps({"Label": "work.example.usage-hud"}))
+    return root
+
+
+def link_usage_commands(bench, root):
+    binaries = bench.home / ".local" / "bin"
+    binaries.mkdir(parents=True, exist_ok=True)
+    for name in USAGE_LINKS:
+        (binaries / name).symlink_to(root / "home" / ".local" / "bin" / name)
+
+
+def link_legacy_agent(bench, root):
+    agents = bench.home / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True, exist_ok=True)
+    (agents / LEGACY_PLIST).symlink_to(root / "home" / "Library" / "LaunchAgents" / LEGACY_PLIST)
+
+
+# (usage links, legacy agent link, jello plist and bundle) -> (usage, hud), exit code.
+M4 = (
+    ("before-cutover", True, True, False, ("owned-by-dotfiles", "owned-by-dotfiles"), 0),
+    ("both-installed", True, True, True, ("owned-by-dotfiles", "owned-by-dotfiles"), 0),
+    ("after-cutover", False, False, True, ("ok", "ok"), 0),
+    ("nothing-installed", False, False, False, ("ok", "missing"), 1),
+    ("agent-only", False, True, False, ("ok", "owned-by-dotfiles"), 0),
+)
+
+
+@pytest.mark.parametrize("name,links,legacy,jello_pair,expected,code", M4,
+                         ids=[row[0] for row in M4])
+def test_doctor_hud_matrix(bench, name, links, legacy, jello_pair, expected, code):
+    """C19 and matrix M4, row by row. The setup steps are installed first so the exit code
+    reads off the two HUD rows alone."""
+    assert hud.DEFAULT_LABEL == HUD_LABEL, "the label the owner signed"
+    root = hud_dotfiles(bench)
+    assert bench.run("setup", JELLO_DOTFILES_ROOT=str(root)).returncode == 0
+    if links:
+        link_usage_commands(bench, root)
+    if legacy:
+        link_legacy_agent(bench, root)
+    if jello_pair:
+        install_hud_targets(bench)
+    before = bench.digest()
+
+    result = bench.run("doctor", JELLO_DOTFILES_ROOT=str(root))
+    rows = verdicts(result)
+
+    assert (rows["usage"], rows["hud"]) == expected
+    assert result.returncode == code
+    # L4: the verdict is read off the filesystem, so the filesystem cannot move -- and the
+    # dotfiles tree under this HOME is inside the digest, so doctor cannot touch it either.
+    assert bench.digest() == before
+
+    # Every row names the target it judged, which is what makes the table actionable.
+    details = {line.split("\t")[0]: line.split("\t")[2] for line in result.stdout.splitlines()}
+    assert (str(root) in details["usage"]) == links
+    assert (LEGACY_PLIST in details["hud"]) == legacy
+    if not legacy:
+        assert HUD_LABEL in details["hud"]
+
+
+def test_doctor_hud_row_never_asks_launchd(bench):
+    """The verdict is about what is installed, not about what is running: a HOME with the
+    pair present reads `ok` with no launchctl on PATH at all."""
+    install_hud_targets(bench)
+    result = bench.run("doctor", PATH="")
+    assert verdicts(result)["hud"] == "ok"
+
