@@ -279,39 +279,6 @@ def test_fetch_writes_only_api_caches(bench, tmp_path):
 
 # --- C08 -------------------------------------------------------------------------------
 
-def test_fetch_auth_paths(bench):
-    now = int(time.time())
-    endpoint = Endpoint([(401, {}), (200, usage_payload(now))])
-    try:
-        result = fetch(bench, endpoint)
-    finally:
-        endpoint.close()
-    assert result.stdout == "pri: ok\n" and result.returncode == 0
-    woken = bench["log"].read_text().splitlines()
-    assert woken[0] == "-p ok --model haiku"
-    assert woken[1] == os.path.join(str(bench["home"]), ".claude-pri")
-
-    # A second 401 after the one wake is a real re-login, and there is never a second wake.
-    bench["log"].write_text("")
-    endpoint = Endpoint([(401, {})])
-    try:
-        result = fetch(bench, endpoint)
-    finally:
-        endpoint.close()
-    assert result.stdout == "pri: auth-stale\n" and result.returncode == 1
-    assert len(bench["log"].read_text().splitlines()) == 2, "exactly one wake"
-
-    # No Keychain item: the reference never attempts the request and never wakes.
-    bench["log"].write_text("")
-    write(str(bench["keychain"]), json.dumps({}))
-    endpoint = Endpoint([(200, usage_payload(now))])
-    try:
-        result = fetch(bench, endpoint)
-    finally:
-        endpoint.close()
-    assert result.stdout == "pri: fetch-failed\n" and result.returncode == 1
-    assert endpoint.calls == 0 and bench["log"].read_text() == ""
-
 
 def test_server_error_is_fetch_failed(bench):
     endpoint = Endpoint([(500, {"error": "nope"})])
@@ -369,7 +336,7 @@ def test_token_never_leaks(bench):
     """Law L1: with both trace switches on, the token string appears in no stream and in
     no file the run wrote."""
     now = int(time.time())
-    endpoint = Endpoint([(401, {}), (200, usage_payload(now))])
+    endpoint = Endpoint([(200, usage_payload(now))])
     try:
         result = fetch(bench, endpoint, USAGE_HUD_FETCH_DEBUG="1", USAGE_HUD_FETCH_DUMP="1")
     finally:
@@ -484,3 +451,19 @@ def test_fetch_no_profiles(tmp_path):
     os.makedirs(str(home))
     result = run_jello(["usage", "fetch"], fixture_env(home))
     assert result.stdout == "" and result.returncode == 1
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_expired_auth_never_starts_an_agent(monkeypatch, tmp_path, status):
+    monkeypatch.setattr(fetch_module, "read_keychain_token", lambda name: "fixture-token")
+    requests = []
+    def request(token):
+        requests.append(token)
+        return status, "{}"
+    monkeypatch.setattr(fetch_module, "request_usage", request)
+    def forbidden(*args, **kwargs):
+        pytest.fail("Reading usage must not start an agent")
+    monkeypatch.setattr(fetch_module.subprocess, "Popen", forbidden)
+    assert fetch_module.fetch_claude("demo", str(tmp_path), str(tmp_path)) == ("auth-stale", False)
+    assert requests == ["fixture-token"]
+    assert list(tmp_path.iterdir()) == []

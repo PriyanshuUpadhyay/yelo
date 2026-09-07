@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import SwiftUI
 
 let warnColor = Color(red: 0xF5 / 255, green: 0x93 / 255, blue: 0x11 / 255)
@@ -35,24 +34,6 @@ enum PresentationSeverity {
         }
     }
 
-    var statusWord: String {
-        switch self {
-        case .danger: return "LIMIT AT RISK"
-        case .warn: return "RUNNING HIGH"
-        case .calm: return "ON TRACK"
-        }
-    }
-}
-
-extension BubbleBasis {
-    var severity: PresentationSeverity {
-        switch self {
-        case .severity(let pct): return PresentationSeverity(pct: pct, pressure: nil)
-        case .pressure(.red): return .danger
-        case .pressure(.amber): return .warn
-        case .pressure(.green): return .calm
-        }
-    }
 }
 
 private struct NotchBackdropShape: Shape {
@@ -99,7 +80,9 @@ private struct NotchBackdropShape: Shape {
 
 struct ContentView: View {
     @ObservedObject var model: UsageModel
-    @State private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var isCollapsed: Bool { model.isCollapsed }
 
@@ -115,9 +98,7 @@ struct ContentView: View {
 
     private var geometryAnimation: Animation? {
         guard !reduceMotion else { return nil }
-        return isCollapsed
-            ? .spring(response: 0.36, dampingFraction: 0.88)
-            : .spring(response: 0.5, dampingFraction: 0.78)
+        return .spring(response: 0.32, dampingFraction: 1)
     }
 
     private var contentAnimation: Animation {
@@ -131,12 +112,19 @@ struct ContentView: View {
 
             if !isCollapsed {
                 ExpandedContent(model: model, reduceMotion: reduceMotion)
-                    .transition(.opacity.combined(with: .offset(y: -6)))
+                    .transition(reduceMotion ? .identity : .opacity)
                     .animation(contentAnimation, value: isCollapsed)
             }
         }
         .frame(width: currentSize.width, height: currentSize.height, alignment: .top)
-        .background(Color.black)
+        .background {
+            if reduceTransparency || contrast == .increased || isCollapsed {
+                Color.black
+            } else {
+                LinearGradient(colors: [Color(white: 0.095), Color(white: 0.055)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
         .clipShape(
             NotchBackdropShape(
                 topShoulder: isCollapsed ? 6 : 18,
@@ -151,12 +139,5 @@ struct ContentView: View {
         .animation(geometryAnimation, value: isCollapsed)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification
-            )
-        ) { _ in
-            reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        }
     }
 }

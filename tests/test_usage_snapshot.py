@@ -193,8 +193,7 @@ def test_row_states(tmp_path):
                         "reason": "no data", "canFetch": True}]
 
     logged_out = rows_of(run_jello(["usage", "show", "--json"], fixture_env(home)))
-    assert logged_out == [{"label": "cl·pri", "provider": "claude", "state": "logged_out",
-                           "reason": "logged out", "canFetch": True}]
+    assert logged_out == offline, "local reads do not inspect sign-in state"
 
 
 def test_stale_after_is_the_gate(tmp_path):
@@ -317,13 +316,6 @@ def test_row_keys_and_table(tmp_path):
     assert all("active" not in row for row in show_rows(bare))
 
 
-def test_prime_sign_in_rides_the_codex_row(tmp_path):
-    home, directory = codex_home(tmp_path, name="alt")
-    write(os.path.join(str(home), ".prime", "agent-alt", "auth.json"),
-          json.dumps({"openai-codex": {"type": "oauth", "access": "token",
-                                       "accountId": "acc-1"}}) + "\n")
-    row = show_rows(home)[0]
-    assert row["label"] == "cx·alt" and row["primeSignedIn"] is True
 
 
 # --- C06 -------------------------------------------------------------------------------
@@ -372,11 +364,7 @@ def keychain_service(home, name):
 
 
 def test_show_never_reads_token_bytes(tmp_path):
-    """R12: a claude row's signed-in state comes from the Keychain METADATA probe the
-    reference used -- the item's existence, read off the return code. `usage show` asks
-    once per profile and never passes -w, so no token byte is read, printed, or written,
-    and it never raises the access prompt that reading the password would. The command that
-    MAY pass -w is the fetch (test_usage_fetch.py::test_token_never_leaks)."""
+    """Local usage does not access the Keychain, including its metadata."""
     now = int(time.time())
     home = build_usage_home(tmp_path / "home", now)
     stub = tmp_path / "stubs" / "security"
@@ -386,11 +374,7 @@ def test_show_never_reads_token_bytes(tmp_path):
     rows = show_rows(home, AGENT_PROFILES_SECURITY_BIN=str(stub), FAKE_SECURITY_LOG=str(log))
     assert rows, "the show did emit its rows"
 
-    calls = [line.split("\t") for line in log.read_text().splitlines() if line]
-    assert [argv[0] for argv in calls] == ["find-generic-password"] * 2, "once per profile"
-    assert {argv[argv.index("-s") + 1] for argv in calls} == {
-        keychain_service(home, "pri"), keychain_service(home, "work")}
-    assert all("-w" not in argv for argv in calls), "show never reads the token bytes"
+    assert not log.exists(), "local usage must not call the Keychain"
 
 
 def test_show_writes_nothing(tmp_path):

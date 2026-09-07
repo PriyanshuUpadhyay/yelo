@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 
-private let barFillFade = 0.5
-private let hairline = Color.primary.opacity(0.12)
 
 /// Calm bars carry provider identity; severity overrides to amber/red.
 private func providerColor(_ provider: String) -> Color {
@@ -29,21 +27,7 @@ func limitTimeLabel(_ date: Date, now: Date = Date(), calendar: Calendar = .curr
 }
 
 private func availabilityCopy(_ row: MeterRow) -> String {
-    if row.state == "logged_out" {
-        if row.provider == "codex", row.primeSignedIn == true {
-            return "Codex logged out · Prime Agent signed in"
-        }
-        return "logged out"
-    }
-    let reason = row.reason ?? ""
-    return reason.isEmpty || reason == "no data" ? "offline · no recent data" : "offline · \(reason.lowercased())"
-}
-
-private func primeStatusCopy(_ rows: [MeterRow]) -> String? {
-    guard rows.first?.provider == "codex", let state = rows.compactMap(\.primeSignedIn).first else {
-        return nil
-    }
-    return state ? "Prime Agent signed in" : "Prime Agent logged out"
+    row.state == "logged_out" ? "Sign in to this account to see usage." : "No local usage yet. Use this account in the CLI to update it."
 }
 
 private func windowOrder(_ window: String?) -> Int {
@@ -56,18 +40,17 @@ private func windowOrder(_ window: String?) -> Int {
 
 private func windowLabel(_ row: MeterRow) -> String {
     switch row.window {
-    case "5h": return "5-hour session"
-    case "7d": return row.provider == "codex" ? "Weekly" : "7-day · all models"
-    case "fb": return "Weekly · Fable"
+    case "5h": return "5 hours"
+    case "7d": return "Weekly"
+    case "fb": return "Fable · week"
     case let window?: return window.isEmpty ? "—" : window
     case nil: return "—"
     }
 }
 
-private func sectionTitle(label: String, provider: String) -> String {
-    let (title, prefix, bare) = provider == "codex" ? ("CODEX", "cx·", "cx") : ("CLAUDE", "cl·", "cl")
-    let name = label.hasPrefix(prefix) ? String(label.dropFirst(prefix.count)) : (label == bare ? "" : label)
-    return name.isEmpty ? title : "\(title) · \(name.uppercased())"
+private func accountName(label: String, provider: String) -> String {
+    let prefix = provider == "codex" ? "cx·" : "cl·"
+    return label.hasPrefix(prefix) ? String(label.dropFirst(prefix.count)) : (label == "cx" ? "Default" : label)
 }
 
 private func sourceLabel(_ source: String?) -> String {
@@ -87,21 +70,19 @@ private func ageLabel(since date: Date, now: Date) -> String {
     return "\(max(1, Int(seconds / 86_400)))d ago"
 }
 
-/// Only a row a fetch can actually refresh may offer "fetch to verify" — `canFetch` nil fails CLOSED
-/// (no promise), and a Codex row says what would actually move it instead.
+/// Stale values explain their age and the action that can produce a new local sample.
 func freshnessDetail(_ row: MeterRow, now: Date = Date()) -> String? {
     guard !row.isLive else { return nil }
     if row.isStale, row.reset == "now" {
         return "Window reset · waiting for a current \(sourceLabel(row.source)) sample"
     }
-    let fetchClause = row.canFetch == true ? " · fetch to verify"
-        : row.provider == "codex" ? " · updates only while a Codex session runs" : ""
+    let fetchClause = " · click Refresh to fetch current usage"
     if row.isStale, let seenAt = row.seenAt {
         let age = ageLabel(since: Date(timeIntervalSince1970: seenAt), now: now)
         return "\(sourceLabel(row.source)) last confirmed \(age)\(fetchClause)"
     }
     if row.state == "missing" {
-        return "No verified sample for this window\(fetchClause)"
+        return "No local sample for this window\(fetchClause)"
     }
     return nil
 }
@@ -123,19 +104,12 @@ private func riskText(_ pressure: RowPressure?) -> String? {
 /// when unanchorable.
 private func resetText(_ row: MeterRow, fetchedAt: Date?) -> String? {
     guard let reset = row.reset else { return nil }
-    if reset == "now" { return "resets now" }
+    // An expired sample has no upcoming reset. Its clock mark explains the state.
+    if reset == "now" { return row.isStale ? nil : "Resets now" }
     if let hours = parseResetHours(reset), let fetchedAt {
-        return "resets \(limitTimeLabel(fetchedAt.addingTimeInterval(hours * 3600)))"
+        return "Resets \(limitTimeLabel(fetchedAt.addingTimeInterval(hours * 3600)))"
     }
-    return "resets in \(reset)"
-}
-
-/// The reset time always owns the meta slot — "when does this come back" matters most at 100%,
-/// exactly when risk text used to displace it — so risk moves up beside the window label. A row
-/// with risk but no reset keeps risk in the meta slot rather than going blank.
-func metaTexts(risk: String?, reset: String?) -> (labelRisk: String?, meta: String?, metaIsRisk: Bool) {
-    guard let reset else { return (nil, risk, risk != nil) }
-    return (risk, reset, false)
+    return "Resets in \(reset)"
 }
 
 private func groupedByLabel(_ rows: [MeterRow]) -> [(label: String, rows: [MeterRow])] {
@@ -147,34 +121,13 @@ private func groupedByLabel(_ rows: [MeterRow]) -> [(label: String, rows: [Meter
     return result
 }
 
-private func reportOverflow(_ size: CGSize, availableHeight: CGFloat) {
-    guard size.width > expandedSurfaceWidth || size.height > availableHeight else { return }
-    let message = "usage-hud: expanded content \(size) exceeds available \(expandedSurfaceWidth)x\(availableHeight)\n"
-    FileHandle.standardError.write(Data(message.utf8))
-}
-
-/// Header affordance that fires an on-demand API fetch. Fixed footprint so swapping the icon for
-/// the in-flight spinner never nudges the header layout; disabled + spinning while a fetch runs.
-private struct FetchButton: View {
-    @ObservedObject var model: UsageModel
-
-    var body: some View {
-        Button(action: { hudLog("[fetch] button tapped"); model.fetchFromAPI() }) {
-            ZStack {
-                if model.isFetching {
-                    ProgressView().controlSize(.mini).scaleEffect(0.7)
-                } else {
-                    Image(systemName: "icloud.and.arrow.down").font(.system(size: 11))
-                }
-            }
-            .frame(width: 14, height: 14)
-            .foregroundColor(.secondary)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(model.isFetching)
-        .help("Fetch usage from API")
-        .accessibilityLabel("Fetch usage from API")
+private struct HUDButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: 30, height: 30)
+            .background(.primary.opacity(configuration.isPressed ? 0.16 : 0.06), in: Circle())
+            .contentShape(Circle())
     }
 }
 
@@ -185,301 +138,277 @@ private struct UsageBarView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let clamped = min(max(pct, 0), 100)
-            let fillWidth = proxy.size.width * CGFloat(clamped) / 100
+            let fillWidth = proxy.size.width * CGFloat(min(max(pct, 0), 100)) / 100
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2).fill(Color.primary.opacity(0.08))
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(fill)
-                    .frame(width: fillWidth)
-                    .animation(reduceMotion ? nil : .easeOut(duration: barFillFade), value: fillWidth)
+                Capsule().fill(Color.primary.opacity(0.09))
+                Capsule().fill(fill).frame(width: fillWidth)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: fillWidth)
             }
         }
-        .frame(height: 4)
+        .frame(height: 3)
+        .accessibilityHidden(true)
     }
 }
 
-private let accountLabelWidth: CGFloat = 140
-private let meterSpacing: CGFloat = 10
-// The expanded shape removes 18 points at each shoulder; this leaves 18 visible points inside it.
-private let expandedContentHorizontalPadding: CGFloat = 36
-private let meterCellWidth = (
-    expandedSurfaceWidth - expandedContentHorizontalPadding * 2 - accountLabelWidth - 12 - meterSpacing * 2
-) / 3
-
 private struct MeterCell: View {
-    let row: MeterRow
+    let row: MeterRow?
     let pressure: RowPressure?
     let fetchedAt: Date?
     let reduceMotion: Bool
 
-    private var pct: Int { row.pct ?? 0 }
-
-    private var tint: (bar: Color, text: Color)? {
-        let severity = PresentationSeverity(pct: pct, pressure: pressure?.pressure)
-        guard let bar = severity.barColor, let text = severity.textColor else { return nil }
-        return (bar, text)
+    private var severity: PresentationSeverity {
+        PresentationSeverity(pct: row?.pct ?? 0, pressure: pressure?.pressure)
     }
 
-    private var texts: (labelRisk: String?, meta: String?, metaIsRisk: Bool) {
-        guard row.pct != nil else { return (nil, nil, false) }
-        return metaTexts(risk: riskText(pressure), reset: resetText(row, fetchedAt: fetchedAt))
-    }
-
-    private var meta: Text? {
-        let texts = texts
-        return texts.meta.map {
-            Text($0).foregroundColor(texts.metaIsRisk ? tint?.text ?? .secondary : .secondary)
-        }
-    }
-
-    private var windowTitle: Text {
-        let base = Text(windowLabel(row)).foregroundColor(.secondary)
-        guard let risk = texts.labelRisk else { return base }
-        return base + Text(" · \(risk)").foregroundColor(tint?.text ?? .secondary)
+    private var detail: String {
+        guard let row else { return "" }
+        if row.isLive, let risk = riskText(pressure) { return risk }
+        return resetText(row, fetchedAt: fetchedAt) ?? ""
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            // Middle truncation: with a risk suffix present, the ETA tail must survive a squeeze.
-            windowTitle
-                .font(.system(size: 9, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            UsageBarView(
-                pct: pct,
-                fill: row.pct == nil ? .clear : tint?.bar ?? providerColor(row.provider).opacity(0.78),
-                reduceMotion: reduceMotion
-            )
-
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                if let pct = row.pct {
+        VStack(alignment: .leading, spacing: 6) {
+            if let row, let pct = row.pct {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text("\(pct)%")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 16, weight: .medium, design: .rounded))
                         .monospacedDigit()
-                        .foregroundColor(tint?.text ?? .primary)
-                        .contentTransition(.numericText())
-                } else {
-                    Text("No data")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundColor(dangerTextColor)
+                        .foregroundStyle(row.isLive ? severity.textColor ?? .primary : .primary.opacity(0.8))
+                    if row.isStale {
+                        Image(systemName: "clock")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Older sample")
+                    }
                 }
-                Spacer(minLength: 2)
-                if let meta {
-                    meta.font(.system(size: 8, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                UsageBarView(
+                    pct: pct,
+                    fill: row.isLive ? severity.barColor ?? providerColor(row.provider) : providerColor(row.provider).opacity(0.45),
+                    reduceMotion: reduceMotion
+                )
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(row.isLive ? severity.textColor ?? .secondary : .secondary)
+                    .lineLimit(1)
+            } else {
+                Text("—").font(.system(size: 16)).foregroundStyle(.secondary)
+                Text("No sample").font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
-        .saturation(row.isStale ? 0 : 1)
-        .opacity(row.isStale ? 0.62 : 1)
-        .animation(reduceMotion ? nil : .easeOut(duration: microFade), value: row.isStale)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(row.map { "\(windowLabel($0)), \($0.pct.map { "\($0) percent used" } ?? "No sample")" } ?? "No sample")
+        .accessibilityValue([detail, row.flatMap { freshnessDetail($0) } ?? ""].filter { !$0.isEmpty }.joined(separator: ". "))
+        .help(row.map { freshnessDetail($0) ?? windowLabel($0) } ?? "No local sample for this window")
     }
 }
 
-private struct MeterSection: View {
-    let label: String
+private struct ProviderSection: View {
+    @Environment(\.colorSchemeContrast) private var contrast
+    let provider: String
     let rows: [MeterRow]
     let pressures: [RowPressure]
     let fetchedAt: Date?
     let reduceMotion: Bool
-    let startIndex: Int
 
-    private var staleCaption: String? {
-        guard rows.contains(where: \.isStale),
-              let oldest = rows.compactMap({ $0.seenAt }).min() else { return nil }
-        return "data \(timeFormatter.string(from: Date(timeIntervalSince1970: oldest)))"
-    }
-
-    private var statusCaption: String? {
-        let parts = [
-            primeStatusCopy(rows),
-            staleCaption,
-            rows.contains { $0.active == true } ? "active" : nil,
-        ].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private var sortedRows: [MeterRow] {
-        rows.sorted { windowOrder($0.window) < windowOrder($1.window) }
+    private let accountWidth: CGFloat = 136
+    private var accounts: [(label: String, rows: [MeterRow])] { groupedByLabel(rows) }
+    private var windows: [String] {
+        Set(rows.compactMap(\.window)).sorted {
+            windowOrder($0) == windowOrder($1) ? $0 < $1 : windowOrder($0) < windowOrder($1)
+        }
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Rectangle()
-                        .fill(providerColor(rows.first?.provider ?? ""))
-                        .frame(width: 2, height: 14)
-                    Text(sectionTitle(label: label, provider: rows.first?.provider ?? ""))
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .tracking(0.7)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+        VStack(spacing: 0) {
+            HStack(spacing: 18) {
+                HStack(spacing: 7) {
+                    Circle().fill(providerColor(provider)).frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                    Text(provider == "codex" ? "Codex" : "Claude")
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                if let trailing = statusCaption {
-                    Text(trailing)
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 8)
+                .frame(width: accountWidth, alignment: .leading)
+                ForEach(windows, id: \.self) { window in
+                    Text(rows.first { $0.window == window }.map(windowLabel) ?? window)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                if windows.isEmpty { Spacer(minLength: 0) }
             }
-            .frame(width: accountLabelWidth, alignment: .leading)
+            .padding(.bottom, 10)
 
-            if let unavailable = rows.first(where: { $0.state == "offline" || $0.state == "logged_out" }) {
-                Text(availabilityCopy(unavailable))
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.secondary)
-                Spacer(minLength: 0)
-            } else {
-                HStack(alignment: .center, spacing: meterSpacing) {
-                    ForEach(Array(sortedRows.enumerated()), id: \.element.window) { index, row in
-                        MeterCell(
-                            row: row,
-                            pressure: pressures.first { $0.label == row.label && $0.window == row.window },
-                            fetchedAt: fetchedAt,
-                            reduceMotion: reduceMotion
-                        )
-                        .frame(width: meterCellWidth)
-                        .transition(rowTransition(delay: rowDelay(index)))
+            ForEach(accounts, id: \.label) { account in
+                HStack(spacing: 18) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(accountName(label: account.label, provider: provider))
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(accountName(label: account.label, provider: provider))
+                        Text(account.rows.contains { $0.active == true } ? "Last used" : accountAge(account.rows))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    Spacer(minLength: 0)
+                    .frame(width: accountWidth, alignment: .leading)
+                    if let unavailable = account.rows.first(where: { $0.state == "offline" || $0.state == "logged_out" }) {
+                        Text(availabilityCopy(unavailable))
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(windows, id: \.self) { window in
+                            MeterCell(
+                                row: account.rows.first { $0.window == window },
+                                pressure: pressures.first { $0.label == account.label && $0.window == window },
+                                fetchedAt: fetchedAt, reduceMotion: reduceMotion
+                            )
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)).frame(height: 0.5)
+                }
             }
         }
-        .padding(.vertical, 7)
-        .overlay(alignment: .top) { Rectangle().fill(hairline).frame(height: 1) }
     }
 
-    private func rowDelay(_ localIndex: Int) -> Double { Double(startIndex + localIndex) * 0.025 }
-
-    private func rowTransition(delay: Double) -> AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return .asymmetric(
-            insertion: .opacity.combined(with: .offset(y: 4)).animation(.easeOut(duration: 0.22).delay(delay)),
-            removal: .opacity.animation(.easeOut(duration: microFade))
-        )
+    private func accountAge(_ rows: [MeterRow]) -> String {
+        guard let seen = rows.compactMap(\.seenAt).min() else { return "" }
+        return ageLabel(since: Date(timeIntervalSince1970: seen), now: Date())
     }
 }
 
 struct ExpandedContent: View {
     @ObservedObject var model: UsageModel
     let reduceMotion: Bool
+    @State private var naturalHeight: CGFloat = 0
 
-    private var groups: [(label: String, rows: [MeterRow], startIndex: Int)] {
-        var result: [(label: String, rows: [MeterRow], startIndex: Int)] = []
-        var index = 0
-        for (label, rows) in groupedByLabel(model.rows) {
-            result.append((label, rows, index))
-            index += rows.contains { $0.state == "offline" || $0.state == "logged_out" } ? 1 : rows.count
-        }
-        return result
-    }
-
-    private var status: (word: String, tint: Color?) {
-        guard let basis = bubbleBasis(model.bindingPressure) else { return ("WAITING FOR DATA", nil) }
-        let severity = basis.severity
-        return (severity.statusWord, severity.textColor)
-    }
-
-    private var headerMeta: (text: String, warn: Bool) {
-        if model.fetchFailed { return ("refresh failed", true) }
-        if model.isRefreshing && model.lastFetchAt == nil { return ("updating…", false) }
-        guard let last = model.lastFetchAt else { return ("", false) }
-        return ("updated \(timeFormatter.string(from: last))", false)
-    }
+    // Keep controls visible while only the account list scrolls.
+    private let headerHeight: CGFloat = 66
+    private let footerHeight: CGFloat = 58
+    private var availableHeight: CGFloat { min(640, max(0, hudPanelSize.height - model.notchTopInset)) }
+    private var visibleHeight: CGFloat { min(naturalHeight > 0 ? naturalHeight + headerHeight + footerHeight : availableHeight, availableHeight) }
+    private var accountCount: Int { groupedByLabel(model.rows).count }
+    private var hasOlderSamples: Bool { model.rows.contains(where: \.isStale) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(status.word)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .tracking(1.2)
-                    .foregroundColor(status.tint ?? .primary)
-                Spacer()
-                Text(model.statusText ?? headerMeta.text)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(headerMeta.warn && model.statusText == nil ? warnTextColor : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                FetchButton(model: model)
+        VStack(spacing: 0) {
+            header.frame(height: headerHeight)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 20) {
+                    if model.firstLaunchFailure {
+                        emptyState(symbol: "exclamationmark.circle", title: "Usage is unavailable",
+                                   detail: "Check that Jello is installed, then click Refresh.")
+                    } else if model.rows.isEmpty && !model.hasLoadedSnapshot {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small)
+                            Text("Reading usage…").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 150)
+                    } else if model.rows.isEmpty {
+                        emptyState(symbol: "person.crop.circle.badge.plus", title: "No accounts yet",
+                                   detail: "Add a Claude or Codex profile with Jello.\nUsage appears after you use it.")
+                    } else {
+                        ForEach(["claude", "codex"], id: \.self) { provider in
+                            let rows = model.rows.filter { $0.provider == provider }
+                            if !rows.isEmpty {
+                                ProviderSection(provider: provider, rows: rows, pressures: model.rowPressures,
+                                                fetchedAt: model.lastSnapshotAt, reduceMotion: reduceMotion)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 8)
+                .frame(width: expandedSurfaceWidth - 68)
+                .background(GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { reportMeasuredSize(proxy.size) }
+                        .onChange(of: proxy.size) { _, size in reportMeasuredSize(size) }
+                })
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: max(0, visibleHeight - headerHeight - footerHeight))
+            footer.frame(height: footerHeight)
+        }
+        .padding(.horizontal, 34)
+        .frame(width: expandedSurfaceWidth, height: visibleHeight, alignment: .top)
+    }
 
-            if model.firstLaunchFailure {
-                Text("usage unavailable · no data yet")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.secondary)
-            } else if model.rows.isEmpty {
-                SkeletonView(reduceMotion: reduceMotion)
-            } else {
-                ForEach(groups, id: \.label) { group in
-                    MeterSection(
-                        label: group.label,
-                        rows: group.rows,
-                        pressures: model.rowPressures,
-                        fetchedAt: model.lastSnapshotAt,
-                        reduceMotion: reduceMotion,
-                        startIndex: group.startIndex
-                    )
+    private var header: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Usage").font(.system(size: 18, weight: .semibold))
+                Text(accountCount == 0 ? "Claude & Codex" : "\(accountCount) \(accountCount == 1 ? "account" : "accounts") · Percentage used")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Button(action: model.fetchFromAPI) {
+                if model.isFetching || model.isRefreshing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
                 }
             }
+            .buttonStyle(HUDButtonStyle())
+            .disabled(model.isFetching || model.isRefreshing)
+            .help("Refresh usage from API (⌘R)")
+            .accessibilityLabel("Refresh usage from API")
+            .keyboardShortcut("r", modifiers: .command)
+            Button {
+                model.openedFromMenu = false
+                model.isCollapsed = true
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(HUDButtonStyle())
+            .help("Close usage (Esc)")
+            .accessibilityLabel("Close usage")
+            .keyboardShortcut(.cancelAction)
         }
-        .frame(
-            width: expandedSurfaceWidth - expandedContentHorizontalPadding * 2,
-            alignment: .topLeading
-        )
-        .padding(.horizontal, expandedContentHorizontalPadding)
-        .padding(.vertical, 14)
-        .background(GeometryReader { proxy in
-            Color.clear
-                .onAppear { reportMeasuredSize(proxy.size) }
-                .onChange(of: proxy.size) { _, size in reportMeasuredSize(size) }
-        })
-        .frame(maxHeight: hudPanelSize.height, alignment: .top)
+    }
+
+    private var footer: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: model.fetchFailed || model.apiFetchResult?.warning == true ? "exclamationmark.circle" : hasOlderSamples ? "clock" : "internaldrive")
+                .font(.system(size: 11))
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(footerMessage)
+                    .font(.system(size: 11, weight: .medium))
+                Text("Refresh fetches from API. Background reads stay local.")
+                    .font(.system(size: 10))
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(model.fetchFailed || model.apiFetchResult?.warning == true ? warnTextColor : .secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Color.primary.opacity(0.08).frame(height: 0.5).offset(y: -10) }
+    }
+
+    private var footerMessage: String {
+        if model.isFetching { return "Fetching usage from API…" }
+        if model.fetchFailed { return "Could not read local usage. Try Refresh." }
+        if let result = model.apiFetchResult { return "Last fetch: \(result.message)" }
+        return hasOlderSamples ? "Clock marks an older sample." : "Usage from local samples"
+    }
+
+    private func emptyState(symbol: String, title: String, detail: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 26, weight: .light)).foregroundStyle(.secondary)
+            Text(title).font(.system(size: 14, weight: .medium))
+            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 42)
+        .frame(maxWidth: .infinity, minHeight: 150)
     }
 
     private func reportMeasuredSize(_ size: CGSize) {
-        let availableHeight = max(0, hudPanelSize.height - model.notchTopInset)
-        reportOverflow(size, availableHeight: availableHeight)
-        let height = min(size.height, availableHeight)
-        let width = min(size.width, expandedSurfaceWidth)
-        if model.expandedContentHeight != height { model.expandedContentHeight = height }
-        if model.expandedContentWidth != width { model.expandedContentWidth = width }
-    }
-}
-
-private struct SkeletonView: View {
-    let reduceMotion: Bool
-    @State private var dimmed = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(0..<3, id: \.self) { _ in
-                VStack(alignment: .leading, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1.5).fill(Color.primary.opacity(0.10)).frame(width: 96, height: 10)
-                    Rectangle().fill(hairline).frame(height: 1)
-                    RoundedRectangle(cornerRadius: 1.5).fill(Color.primary.opacity(0.07)).frame(height: 3)
-                    RoundedRectangle(cornerRadius: 1.5).fill(Color.primary.opacity(0.07)).frame(height: 3)
-                }
-            }
-        }
-        .opacity(dimmed ? 0.45 : 1)
-        .onAppear { if !reduceMotion { startBreathing() } }
-        .onChange(of: reduceMotion) { _, value in
-            if value {
-                withAnimation(.easeOut(duration: microFade)) { dimmed = false }
-            } else {
-                startBreathing()
-            }
-        }
-    }
-
-    private func startBreathing() {
-        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-            dimmed = true
-        }
+        naturalHeight = size.height
+        model.expandedContentHeight = min(size.height + headerHeight + footerHeight, availableHeight)
+        model.expandedContentWidth = expandedSurfaceWidth
     }
 }

@@ -234,7 +234,7 @@ def row_state(has_data, seen, epoch, now, limit):
 
 # --- rows ------------------------------------------------------------------------------
 
-def emit_row(label, provider, window, state, pick, active, can_fetch, prime_signed_in, now):
+def emit_row(label, provider, window, state, pick, active, can_fetch, now):
     """`pct` rides `ok` and `stale` rows so the HUD can retain the last confirmed value;
     consumers read `state`, not the presence of `pct`. `asOf` is when the value last MOVED
     (history dedup keys on it), `seenAt` when it was last CONFIRMED -- never interchangeable.
@@ -254,18 +254,14 @@ def emit_row(label, provider, window, state, pick, active, can_fetch, prime_sign
         row["source"] = pick.source
     if can_fetch is not None:
         row["canFetch"] = can_fetch
-    if prime_signed_in is not None:
-        row["primeSignedIn"] = prime_signed_in
     return row
 
 
-def status_row(label, provider, state, reason, can_fetch, prime_signed_in=None):
+def status_row(label, provider, state, reason, can_fetch):
     """The reason-only row: no window, percentage, or timestamp fields at all."""
     row = {"label": label, "provider": provider, "state": state, "reason": reason}
     if can_fetch is not None:
         row["canFetch"] = can_fetch
-    if prime_signed_in is not None:
-        row["primeSignedIn"] = prime_signed_in
     return row
 
 
@@ -297,16 +293,16 @@ def claude_rows(row, label, signed_in, active, can_fetch, now, limit):
         return [status_row(label, "claude", "offline", "no data", can_fetch)]
     rows = [
         emit_row(label, "claude", "5h", row_state(five.ok, five.seen, five.epoch, now, limit),
-                 five, active, can_fetch, None, now),
+                 five, active, can_fetch, now),
         emit_row(label, "claude", "7d", row_state(seven.ok, seven.seen, seven.epoch, now, limit),
-                 seven, active, can_fetch, None, now),
+                 seven, active, can_fetch, now),
     ]
     # An account with no Fable cache at all has no Fable limit, so that row is absent by
     # design, not missing.
     if fable.ok or os.path.isfile(paths[1]):
         rows.append(emit_row(label, "claude", "fb",
                              row_state(fable.ok, fable.seen, fable.epoch, now, limit),
-                             fable, active, can_fetch, None, now))
+                             fable, active, can_fetch, now))
     return rows
 
 
@@ -381,9 +377,9 @@ def codex_reading(parsed):
     return {"seen": parsed["ts"], "as_of": parsed["ts"], "source": parsed["source"]}
 
 
-def codex_rows(row, label, signed_in, can_fetch, prime_signed_in, now, limit):
+def codex_rows(row, label, signed_in, can_fetch, now, limit):
     if signed_in is False:
-        return [status_row(label, "codex", "logged_out", "logged out", can_fetch, prime_signed_in)]
+        return [status_row(label, "codex", "logged_out", "logged out", can_fetch)]
     sessions = os.path.join(row["dir"], "sessions")
     cache_path = os.path.join(row["dir"], CODEX_CACHE)
     document = core.read_json(cache_path)
@@ -412,7 +408,7 @@ def codex_rows(row, label, signed_in, can_fetch, prime_signed_in, now, limit):
         reason = "no data"
         if not os.path.isdir(sessions) and not os.path.isfile(cache_path):
             reason = "not set up"
-        return [status_row(label, "codex", "offline", reason, can_fetch, prime_signed_in)]
+        return [status_row(label, "codex", "offline", reason, can_fetch)]
 
     parsed = chosen[pick.source]
     first = Pick()
@@ -420,7 +416,7 @@ def codex_rows(row, label, signed_in, can_fetch, prime_signed_in, now, limit):
     first.seen, first.as_of, first.source = pick.seen, pick.as_of, pick.source
     rows = [emit_row(label, "codex", parsed["w1"],
                      row_state(True, pick.seen, parsed["e1"], now, limit),
-                     first, None, can_fetch, prime_signed_in, now)]
+                     first, None, can_fetch, now)]
     # No `missing` row for an absent second window: Codex retired its 5h limit in 2026-07,
     # so a new rollout carries the weekly window alone. That row is gone upstream.
     if parsed["has2"]:
@@ -429,7 +425,7 @@ def codex_rows(row, label, signed_in, can_fetch, prime_signed_in, now, limit):
         second.seen, second.as_of, second.source = pick.seen, pick.as_of, pick.source
         rows.append(emit_row(label, "codex", parsed["w2"],
                              row_state(True, pick.seen, parsed["e2"], now, limit),
-                             second, None, can_fetch, prime_signed_in, now))
+                             second, None, can_fetch, now))
     return rows
 
 
@@ -449,15 +445,6 @@ def active_index(rows):
     return best
 
 
-def prime_state(prime, name, directory):
-    """Prime's sign-in for one codex home, matched by usage directory or by name."""
-    matches = [row for row in prime
-               if row.get("usage_dir") == directory or (name and row.get("name") == name)]
-    if not matches:
-        return None
-    return any(row.get("signed_in") for row in matches)
-
-
 def snapshot_rows(home, now=None):
     """Every account's rows, in census order: claude profiles first, then codex homes.
 
@@ -475,9 +462,8 @@ def snapshot_rows(home, now=None):
     providers = fetch.capabilities()
     claude_fetch, codex_fetch = "claude" in providers, "codex" in providers
 
-    claude = core.claude_rows()
-    codex = core.codex_rows()
-    prime = core.prime_rows()
+    claude = core.claude_rows(include_identity=False)
+    codex = core.codex_rows(include_identity=False)
     active = active_index(claude)
     rows = []
     for index, row in enumerate(claude):
@@ -485,10 +471,9 @@ def snapshot_rows(home, now=None):
         # include-everything fallback instead of excluding every profile as inactive.
         flag = None if active < 0 else index == active
         rows.extend(claude_rows(row, core.hud_label("claude", row),
-                                core.claude_signed_in(row["name"]), flag, claude_fetch,
+                                None, flag, claude_fetch,
                                 now, limit))
     for row in codex:
         rows.extend(codex_rows(row, core.hud_label("codex", row), row.get("signed_in"),
-                               codex_fetch,
-                               prime_state(prime, row.get("name"), row["dir"]), now, limit))
+                               codex_fetch, now, limit))
     return rows

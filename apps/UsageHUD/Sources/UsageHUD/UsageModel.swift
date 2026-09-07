@@ -22,11 +22,8 @@ struct MeterRow: Codable, Equatable {
     /// Winning cache family for this row (`api`, `statusline`, or `rollout`). Optional for fixtures
     /// and older data scripts; used only to explain freshness in the expanded panel.
     var source: String? = nil
-    /// Whether the unified on-demand fetch can refresh this provider's row.
-    /// nil (fixtures, older data scripts) = no claim, and the UI fails CLOSED: it promises no fetch.
+    /// Whether the CLI can fetch this provider's usage on request.
     var canFetch: Bool? = nil
-    /// Prime Agent login state for the Codex identity that shares this quota row.
-    var primeSignedIn: Bool? = nil
 }
 
 extension MeterRow {
@@ -38,45 +35,21 @@ extension MeterRow {
     var isStale: Bool { state == "stale" }
 }
 
-/// What the app runs a subprocess FOR: one snapshot read, or one refresh.
-enum UsageProcessKind {
-    case snapshot
-    case fetch
-}
-
-/// The executable and arguments for one of those two jobs, derived from the environment
-/// alone — no process is launched here, so the contract is testable on its own.
-///
-/// jello owns the usage pipeline, so the default is `jello usage show --json` and `jello
-/// usage fetch`. launchd hands the job no PATH, which is why the LaunchAgent supplies the
-/// absolute path in `JELLO_BIN` and `~/.local/bin/jello` is only the fallback for a
-/// hand-started run. Each override keeps the contract it always had — path plus `--json`
-/// for the data feed, path alone for the fetch — so the fixture scripts still drive the
-/// app unchanged, and each one is scoped to its own kind.
-func processArguments(
-    kind: UsageProcessKind,
+/// Automatic reads stay local. API fetch is a separate user action.
+func snapshotArguments(
     environment: [String: String]
 ) -> (executable: String, arguments: [String]) {
-    switch kind {
-    case .snapshot:
-        if let script = environment["USAGE_HUD_SCRIPT"] {
-            return (script, ["--json"])
-        }
-        return (jelloPath(environment: environment), ["usage", "show", "--json"])
-    case .fetch:
-        if let script = environment["USAGE_HUD_FETCH_SCRIPT"] {
-            return (script, [])
-        }
-        return (jelloPath(environment: environment), ["usage", "fetch"])
+    if let script = environment["USAGE_HUD_SCRIPT"] {
+        return (script, ["--json"])
     }
+    return (jelloPath(environment: environment), ["usage", "show", "--json"])
 }
 
 private func jelloPath(environment: [String: String]) -> String {
     environment["JELLO_BIN"] ?? ("~/.local/bin/jello" as NSString).expandingTildeInPath
 }
 
-/// Polls the usage provider's `--json` snapshot mode. All token/keychain handling lives
-/// behind that command; this process only ever sees percentages and reset strings.
+/// Polls local usage files through the CLI. This path reads no account credentials.
 final class UsageModel: ObservableObject {
     @Published var rows: [MeterRow] = []
     /// Oldest source-data timestamp in the accepted snapshot.
@@ -84,18 +57,18 @@ final class UsageModel: ObservableObject {
     /// When the local data snapshot was read; reset strings are relative to this moment.
     @Published var lastSnapshotAt: Date?
     @Published var fetchFailed: Bool = false
+    @Published var hasLoadedSnapshot: Bool = false
     @Published var isRefreshing: Bool = false
-    /// True while an on-demand API fetch is in flight — drives the fetch
-    /// button's spinner and guards against double-taps.
     @Published var isFetching: Bool = false
+    @Published var apiFetchResult: APIFetchResult?
 
     /// No rows AND a failed fetch = the FIRST-EVER fetch failed (never had data to show) — distinct
     /// from a mid-run failure, which keeps last-known rows on screen.
     var firstLaunchFailure: Bool { rows.isEmpty && fetchFailed }
 
-    /// Bubble/expanded state. Transient (not persisted) — driven purely by hover, so the app
-    /// always launches collapsed regardless of how it was left last time.
+    /// Hover opens temporarily; opening from the menu keeps the panel open until dismissal.
     @Published var isCollapsed: Bool = true
+    @Published var openedFromMenu: Bool = false
 
     /// Expanded surface's actual fitted content height, reported by ExpandedContent's GeometryReader
     /// and clamped to `hudPanelSize.height` (the invisible window's hard ceiling). Defaults to that
@@ -108,12 +81,10 @@ final class UsageModel: ObservableObject {
     @Published var notchTopInset: CGFloat = fallbackNotchSize.height
     @Published var notchTriggerWidth: CGFloat = fallbackNotchSize.width
 
-    /// Trend history + derived pressure, recomputed on every successful fetch.
+    /// Trend history and pressure update after a successful local read.
     @Published var history: [HistorySample] = []
     @Published var rowPressures: [RowPressure] = []
-    @Published var statusText: String?
 
-    var bindingPressure: RowPressure? { bindingRow(rowPressures) }
 
     /// True when a ceiling change happened while expanded: the stored `expandedContentHeight` was
     /// the visible surface then and couldn't be reset, so the reset is OWED and applied at the
@@ -136,25 +107,39 @@ final class UsageModel: ObservableObject {
         expandedContentHeight = height
     }
 
-    private let historyStore = HistoryStore()
+    private let historyStore: HistoryStore
 
     private var timer: Timer?
-    // A refresh requested while one was already in flight (see refresh()); the follow-up runs when
-    // the in-flight one completes so a post-fetch refresh can't be lost to a racing poll. Main-only.
+    // Queue one reread if a request arrives while the previous read is still running.
     private var refreshQueued = false
-    private var statusClear: DispatchWorkItem?
-    private let snapshotCommand = processArguments(
-        kind: .snapshot, environment: ProcessInfo.processInfo.environment)
-    private let fetchCommand = processArguments(
-        kind: .fetch, environment: ProcessInfo.processInfo.environment)
+    private let snapshotCommand: (executable: String, arguments: [String])
+    private let fetchExecutable: String
     private let pollInterval: TimeInterval = 120
     // The script is local-only (cache reads + rollout scans, no network) — 8s is generous headroom.
     private let processTimeout: TimeInterval = 8
-    // Provider requests run concurrently, but a slow credential renewal can still take up to a
-    // minute. A kill at this ceiling
-    // truncates the script's output, so runFetchScript reports incomplete rather than parsing the
-    // partial status lines as a full result.
-    private let fetchTimeout: TimeInterval = 120
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment,
+         historyStore: HistoryStore = HistoryStore()) {
+        self.historyStore = historyStore
+        snapshotCommand = snapshotArguments(environment: environment)
+        fetchExecutable = jelloPath(environment: environment)
+    }
+
+    func fetchFromAPI() {
+        guard !isFetching else { return }
+        isFetching = true
+        apiFetchResult = nil
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let result = runAPIFetch(executable: self.fetchExecutable)
+            DispatchQueue.main.async {
+                self.apiFetchResult = result
+                self.isFetching = false
+                // Read again even after partial failure: successful accounts already wrote caches.
+                self.refresh()
+            }
+        }
+    }
 
     func start() {
         history = historyStore.load()
@@ -167,10 +152,6 @@ final class UsageModel: ObservableObject {
     }
 
     func refresh() {
-        // A refresh already in flight may have read the caches BEFORE an in-progress write (e.g. the
-        // post-fetch refresh racing a periodic poll) — so don't silently drop this one: queue a
-        // follow-up that runs once the in-flight refresh finishes, guaranteeing a read of the latest
-        // caches instead of stale data until the next 120s poll.
         guard !isRefreshing else { refreshQueued = true; return }
         isRefreshing = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -184,6 +165,7 @@ final class UsageModel: ObservableObject {
                     self.lastFetchAt = oldestDataDate(in: rows)
                     self.lastSnapshotAt = now
                     self.fetchFailed = false
+                    self.hasLoadedSnapshot = true
                     self.history = self.historyStore.append(samplesFromRows(rows, now: now), now: now)
                     self.rowPressures = UsageHUD.rowPressures(rows: rows, history: self.history)
                 case .failure:
@@ -199,82 +181,13 @@ final class UsageModel: ObservableObject {
         }
     }
 
-    /// Show a status message for 2s; a newer message replaces it and resets the timer.
-    func showStatus(_ text: String) {
-        statusText = text
-        statusClear?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.statusText = nil }
-        statusClear = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: item)
-    }
-
-    /// Runs the usage fetch script off-main, then re-reads the local data feed so the new numbers land.
-    /// `isFetching` guards double-taps and drives the button spinner.
-    func fetchFromAPI() {
-        guard !isFetching else { return }
-        isFetching = true
-        hudLog("[fetch] start")
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self else { return }
-            let summary = self.runFetchScript()
-            DispatchQueue.main.async {
-                self.isFetching = false
-                hudLog("[fetch] result \(summary)")
-                self.showStatus("fetch · \(summary)")
-                // Caches may have been rewritten — re-read the data feed to surface the new numbers.
-                self.refresh()
-            }
-        }
-    }
-
-    /// Runs the fetch script, returning a compact one-line summary of its per-profile status lines
-    /// ("<name>: <status>") — or "failed" if it couldn't run / produced nothing.
-    private func runFetchScript() -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: fetchCommand.executable)
-        process.arguments = fetchCommand.arguments
-        let outPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return "failed"
-        }
-
-        let timeoutItem = DispatchWorkItem {
-            if process.isRunning { process.terminate() }
-        }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + fetchTimeout, execute: timeoutItem)
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        timeoutItem.cancel()
-
-        // The timeout's terminate() is the ONLY signal source (the script exits normally otherwise),
-        // so an uncaughtSignal means we killed it mid-run: its output is truncated and the status
-        // lines are partial — report incomplete rather than passing a partial summary off as complete.
-        // A normal exit (status 0 = some ok, 1 = all failed) has complete lines, so those parse fine.
-        if process.terminationReason == .uncaughtSignal {
-            return "timed out"
-        }
-
-        // Each stdout line is "<name>: <status>"; condense to "<name> <status> · …".
-        let parts = String(decoding: data, as: UTF8.self)
-            .split(separator: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .map { $0.replacingOccurrences(of: ": ", with: " ") }
-        return parts.isEmpty ? "failed" : parts.joined(separator: " · ")
-    }
-
     private func fetchSnapshot() -> Result<[MeterRow], Error> {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: snapshotCommand.executable)
         process.arguments = snapshotCommand.arguments
         let outPipe = Pipe()
         process.standardOutput = outPipe
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
@@ -286,10 +199,10 @@ final class UsageModel: ObservableObject {
             if process.isRunning { process.terminate() }
         }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + processTimeout, execute: timeoutItem)
+        // Drain while the child runs so a large account list cannot fill the pipe.
+        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         timeoutItem.cancel()
-
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationStatus == 0, !data.isEmpty else {
             return .failure(NSError(domain: "UsageHUD", code: Int(process.terminationStatus)))
         }
@@ -303,14 +216,58 @@ final class UsageModel: ObservableObject {
     }
 }
 
-/// The oldest CONFIRMATION among the rows this app can keep current — "updated HH:MM" describes the
-/// weakest of those, since taking the newest would let one just-refreshed row vouch for stale
-/// siblings. Rows the unified fetch cannot refresh are excluded. A snapshot where no row claims
-/// `canFetch` (older data script) falls back
-/// to all rows. Reads `seenAt`, not `asOf`: a row confirmed seconds ago whose value last moved days
-/// ago is current, and reporting its `asOf` would be a false staleness alarm.
+/// Use the oldest confirmation so a fresh account cannot hide another account's stale data.
+/// `asOf` records value changes and is not a freshness timestamp.
 func oldestDataDate(in rows: [MeterRow]) -> Date? {
-    let fetchable = rows.filter { $0.canFetch == true }
-    let scope = fetchable.isEmpty ? rows : fetchable
-    return scope.compactMap(\.seenAt).min().map(Date.init(timeIntervalSince1970:))
+    return rows.compactMap(\.seenAt).min().map(Date.init(timeIntervalSince1970:))
+}
+
+struct APIFetchResult {
+    let message: String
+    let warning: Bool
+}
+
+/// The CLI exits zero when at least one account succeeds. Check every status before claiming success.
+func apiFetchSummary(_ output: String, exitCode: Int32) -> APIFetchResult {
+    let lines = output.split(separator: "\n")
+    let statuses = lines.compactMap { $0.components(separatedBy: ": ").last }
+    let updated = statuses.filter { $0 == "ok" }.count
+    guard !statuses.isEmpty, exitCode == 0 || exitCode == 1 else {
+        return APIFetchResult(message: "Could not fetch usage. Try Refresh again.", warning: true)
+    }
+    if exitCode == 0 && updated == statuses.count {
+        return APIFetchResult(message: "Updated \(updated) \(updated == 1 ? "account" : "accounts").", warning: false)
+    }
+    if statuses.contains("auth-stale") {
+        return APIFetchResult(message: "Some accounts need sign-in. Use their CLI launchers.", warning: true)
+    }
+    if statuses.contains("fable-write-failed") {
+        return APIFetchResult(message: "Usage updated, but a Fable sample could not be saved.", warning: true)
+    }
+    return APIFetchResult(message: "Updated \(updated) of \(statuses.count) accounts. Try Refresh again.", warning: true)
+}
+
+func runAPIFetch(executable: String, timeout: TimeInterval = 120) -> APIFetchResult {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = ["usage", "fetch"]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+    } catch {
+        return APIFetchResult(message: "Could not start Jello. Check its installation.", warning: true)
+    }
+    let deadline = DispatchWorkItem {
+        if process.isRunning { process.terminate() }
+    }
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: deadline)
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    deadline.cancel()
+    guard process.terminationReason == .exit else {
+        return APIFetchResult(message: "API fetch did not finish. Try Refresh again.", warning: true)
+    }
+    return apiFetchSummary(String(decoding: data, as: UTF8.self), exitCode: process.terminationStatus)
 }

@@ -26,7 +26,7 @@ REFERENCE = pathlib.Path(
     "/Users/me/dotfiles/home/.claude/scripts/agent-profiles.py"
 )
 REFERENCE_SHA256 = "f9e5dd08d80cb3c9cbb378b0ed6988ee1549411850b5f0efe157abcc1edb201d"
-CLIS = ("claude", "codex", "prime")
+CLIS = ("claude", "codex")
 
 
 def main():

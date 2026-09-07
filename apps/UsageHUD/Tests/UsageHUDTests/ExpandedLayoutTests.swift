@@ -53,32 +53,32 @@ final class RowStalenessTests: XCTestCase {
                              active: false, source: "api", canFetch: true)
         XCTAssertEqual(
             freshnessDetail(stale, now: Date(timeIntervalSince1970: now)),
-            "API last confirmed 20m ago · fetch to verify"
+            "API last confirmed 20m ago · click Refresh to fetch current usage"
         )
     }
 
-    func testStaleCodexDetailOffersTheUnifiedFetch() {
+    func testStaleCodexDetailNamesTheManualUpdatePath() {
         let stale = MeterRow(label: "cx", provider: "codex", window: "7d", pct: 40, reset: "3d",
                              state: "stale", reason: nil, asOf: now - 7200, seenAt: now - 7200,
                              active: nil, source: "api", canFetch: true)
         XCTAssertEqual(
             freshnessDetail(stale, now: Date(timeIntervalSince1970: now)),
-            "API last confirmed 2h ago · fetch to verify"
+            "API last confirmed 2h ago · click Refresh to fetch current usage"
         )
     }
 
     /// Unknown fetchability (fixture or a dock script predating the flag) fails closed.
-    func testUnknownFetchabilityMakesNoFetchPromise() {
+    func testStaleDetailOffersManualRefresh() {
         let stale = MeterRow(label: "cl·pri", provider: "claude", window: "7d", pct: 12, reset: "2d",
                              state: "stale", reason: nil, asOf: now - 1200, seenAt: now - 1200,
                              active: true, source: "api")
         XCTAssertEqual(
             freshnessDetail(stale, now: Date(timeIntervalSince1970: now)),
-            "API last confirmed 20m ago"
+            "API last confirmed 20m ago · click Refresh to fetch current usage"
         )
         let missing = MeterRow(label: "cl·pri", provider: "claude", window: "5h", pct: nil, reset: nil,
                                state: "missing", reason: nil, asOf: nil, active: true)
-        XCTAssertEqual(freshnessDetail(missing), "No verified sample for this window")
+        XCTAssertEqual(freshnessDetail(missing), "No local sample for this window · click Refresh to fetch current usage")
     }
 
     func testExpiredWindowMarksItsLastZeroAsStale() {
@@ -170,20 +170,37 @@ final class ExpandedLayoutTests: XCTestCase {
         XCTAssertLessThan(recovered, 1000)   // settled on true content height, not the ceiling
     }
 
-    /// Three Claude accounts and Codex stay below the minimum panel height in the approved
-    /// one-account-per-row layout, while the content uses the full 600-point surface.
+    /// Account rows use the available width and remain inside the panel ceiling.
     @MainActor
-    func testApprovedOneRowLayoutIsDenseAndWide() {
+    func testAccountsUseTheAvailableSurface() {
         let model = UsageModel()
         model.rows = fullRows()
         let measured = measureExpanded(model)
-        XCTAssertLessThan(measured, 400)
+        XCTAssertLessThanOrEqual(measured, hudPanelSize.height - model.notchTopInset)
         XCTAssertEqual(model.expandedContentWidth, expandedSurfaceWidth)
     }
 
-    /// True worst case: every row carries a red-pressure risk meta line (weekday-form limit ETA,
-    /// the longest variant). There is no scrolling, so this shape must fit under 400pt — the
-    /// `hudPanelHeight` floor, i.e. the smallest panel any screen can produce.
+    @MainActor
+    func testSevenAccountsFitWithoutScreenHeightPanel() {
+        let savedHeight = hudPanelSize.height
+        defer { hudPanelSize.height = savedHeight }
+        hudPanelSize.height = 1000
+        let model = UsageModel()
+        model.rows = fullRows() + (1...3).map { row("cx·account-\($0)", "7d", active: nil) }
+        XCTAssertLessThan(measureExpanded(model), 640)
+    }
+
+    @MainActor
+    func testLongAccountListKeepsCompactViewport() {
+        let savedHeight = hudPanelSize.height
+        defer { hudPanelSize.height = savedHeight }
+        hudPanelSize.height = 1000
+        let model = UsageModel()
+        model.rows = fullRows() + (1...20).map { row("cx·account-\($0)", "7d", active: nil) }
+        XCTAssertEqual(measureExpanded(model), 640)
+    }
+
+    /// Risk labels must fit inside the visible scrolling surface.
     @MainActor
     func testWorstCaseAllRowsAtRiskFitsMinimumCeiling() {
         let model = UsageModel()
@@ -193,7 +210,7 @@ final class ExpandedLayoutTests: XCTestCase {
                         burn: 4, hoursToReset: 120, projected: 95, eta100: 100, pressure: .red)
         }
         let measured = measureExpanded(model)
-        XCTAssertLessThan(measured, 400)
+        XCTAssertLessThanOrEqual(measured, hudPanelSize.height - model.notchTopInset)
     }
 
     @MainActor
@@ -211,7 +228,7 @@ final class ExpandedLayoutTests: XCTestCase {
         return model.expandedContentHeight
     }
 
-    /// The expanded panel has no scrolling — three Claude profiles with Fable plus Codex must
+    /// Three Claude profiles with Fable plus Codex must
     /// measure under `hudPanelSize.height`
     /// (screen-relative on this machine). The measurement lands via ExpandedContent's own
     /// GeometryReader, so this exercises the exact pipeline that sizes the live panel; an overflow

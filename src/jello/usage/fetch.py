@@ -7,10 +7,9 @@ session to report current limits.
 For each Claude profile: read the profile's OAuth access token from the Keychain, GET the
 usage endpoint, and on a fully valid response atomically rewrite that profile's
 `.usage-api-cache.json` (and the Fable weekly window into `.usage-api-cache-fable.json`
-when the payload exposes it). 401 or 403 wakes the profile ONCE through a bounded headless
-`claude -p` one-shot -- the CLI renews and persists its own credentials, we never rotate a
-token here -- then retries once; still 401 gives `auth-stale`. Exit 0 unless every account
-failed.
+when the payload exposes it). 401 or 403 reports `auth-stale`; the person signs in
+through the named Claude launcher. Reading usage never starts an agent, runs hooks,
+or loads MCP integrations. Exit 0 unless every account failed.
 
 The token NEVER leaves memory (law L1): it lives in one local in `fetch_claude`, goes into
 the request header, and is never formatted into a message, a log line, an exception, or a
@@ -20,8 +19,7 @@ one; and everything a trace prints goes through `redact`, so a body that echoes 
 value back cannot ride out on the trace. USAGE_HUD_FETCH_DEBUG traces stages without token
 bytes or bodies; USAGE_HUD_FETCH_DUMP prints the parsed usage payload only.
 
-CLAUDE_KEYCHAIN_SERVICE, CLAUDE_BIN, CODEX_BIN, USAGE_HUD_FETCH_WAKE_TIMEOUT keep their
-reference names. JELLO_USAGE_API_URL redirects the endpoint for tests only.
+CLAUDE_KEYCHAIN_SERVICE and CODEX_BIN retain their override names. JELLO_USAGE_API_URL redirects the endpoint for tests only.
 """
 
 from __future__ import annotations
@@ -32,7 +30,6 @@ import json
 import math
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -46,7 +43,6 @@ from . import codex
 API_URL = "https://api.anthropic.com/api/oauth/usage"
 OAUTH_BETA = "oauth-2025-04-20"
 REQUEST_TIMEOUT_SECONDS = 20
-WAKE_TIMEOUT_DEFAULT = 60
 API_CACHE = ".usage-api-cache.json"
 API_FABLE_CACHE = ".usage-api-cache-fable.json"
 CODEX_CACHE = ".usage-hud-api-cache.json"
@@ -66,20 +62,8 @@ def api_url():
     return os.environ.get("JELLO_USAGE_API_URL") or API_URL
 
 
-def claude_bin():
-    # Not on the LaunchAgent PATH, so it is an absolute path, overridable for tests.
-    return os.environ.get("CLAUDE_BIN") or os.path.join(core.HOME, ".local", "bin", "claude")
-
-
 def codex_bin():
     return shutil.which(os.environ.get("CODEX_BIN") or "codex")
-
-
-def wake_timeout():
-    try:
-        return float(os.environ.get("USAGE_HUD_FETCH_WAKE_TIMEOUT") or WAKE_TIMEOUT_DEFAULT)
-    except ValueError:
-        return float(WAKE_TIMEOUT_DEFAULT)
 
 
 # --- read-only answers the rest of the group asks for ----------------------------------
@@ -322,57 +306,6 @@ def write_cache(path, document):
         return False
 
 
-# --- 401 recovery ----------------------------------------------------------------------
-
-def wake_profile(name, identity):
-    """One bounded headless one-shot with the profile's own securestorage dir. The CLI's
-    startup renews and persists credentials through its normal code path; we only
-    piggyback. Its own session makes the watchdog able to kill the whole tree, because a
-    wedged CLI must not wedge the fetch. Called at most once per profile per run."""
-    binary = claude_bin()
-    if not os.access(binary, os.X_OK):
-        debug(f"{name}: wake skipped (no claude at {binary})")
-        return False
-    environment = os.environ.copy()
-    environment["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = identity
-    debug(f"{name}: 401 -> waking profile via one-shot")
-    try:
-        process = subprocess.Popen(
-            [binary, "-p", "ok", "--model", "haiku"],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            env=environment, start_new_session=True,
-        )
-    except OSError as error:
-        debug(f"{name}: refresh failed ({error.strerror})")
-        return False
-    try:
-        code = process.wait(timeout=wake_timeout())
-    except subprocess.TimeoutExpired:
-        signal_group(process, signal.SIGTERM)
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
-        signal_group(process, signal.SIGKILL)
-        debug(f"{name}: refresh failed (timeout)")
-        return False
-    # The group leader may exit on TERM while a descendant ignores it, so finish with a
-    # group KILL either way; it is a silent no-op when everything is already gone.
-    signal_group(process, signal.SIGKILL)
-    if code == 0:
-        debug(f"{name}: refresh ok, retrying")
-        return True
-    debug(f"{name}: refresh failed (exit {code})")
-    return False
-
-
-def signal_group(process, number_):
-    try:
-        os.killpg(process.pid, number_)
-    except OSError:
-        pass
-
-
 # --- one account -----------------------------------------------------------------------
 
 def fetch_claude(name, directory, identity):
@@ -390,19 +323,6 @@ def fetch_claude(name, directory, identity):
         debug(f"{name}: request failed (network/timeout)")
         return "fetch-failed", False
     debug(f"{name}: http {code}")
-    # An expired access token: wake the profile once so the CLI renews its credentials,
-    # then retry with the re-read token. Any wake or retry failure falls through to
-    # auth-stale -- never a second wake.
-    if code in (401, 403):
-        if wake_profile(name, identity):
-            token = read_keychain_token(name)
-            retry = request_usage(token) if token is not None else (None, None)
-            if retry[0] is None:
-                debug(f"{name}: retry lookup/request failed")
-            else:
-                code, body = retry
-                secret = token
-                debug(f"{name}: http {code} (retry)")
     del token
     if code in (401, 403):
         return "auth-stale", False

@@ -38,11 +38,7 @@ final class PositionTests: XCTestCase {
             notchHeight: 38
         )
 
-        // The expanded surface is a constant 644 wide (expandedSurfaceWidth), never the
-        // panel width and never the notch width: x = (640 - 644) / 2 = -2 under this
-        // test's own 640 override, and y = 900 - (38 + 396). The real panel is 684 wide,
-        // which is what keeps the surface inside it on a live screen.
-        XCTAssertEqual(rect, CGRect(x: -2, y: 466, width: 644, height: 434))
+        XCTAssertEqual(rect, CGRect(x: (640 - expandedSurfaceWidth) / 2, y: 466, width: expandedSurfaceWidth, height: 434))
     }
 
     func testFullNotchHoverRectIncludesTopEdgeAndShoulderArea() {
@@ -67,20 +63,6 @@ final class PositionTests: XCTestCase {
 
         XCTAssertTrue(collapsed.contains(cursor))
         XCTAssertTrue(expanded.contains(cursor))
-    }
-
-    func testFullscreenWindowBoundsMatchDisplayWithinWindowServerRounding() {
-        let display = CGRect(x: 1512, y: 0, width: 1728, height: 1117)
-        let roundedWindow = CGRect(x: 1512.5, y: -0.5, width: 1727, height: 1118)
-
-        XCTAssertTrue(windowBoundsMatchDisplay(roundedWindow, displayBounds: display))
-    }
-
-    func testOrdinaryWindowBoundsDoNotMatchDisplay() {
-        let display = CGRect(x: 0, y: 0, width: 1512, height: 982)
-        let window = CGRect(x: 0, y: 25, width: 1512, height: 957)
-
-        XCTAssertFalse(windowBoundsMatchDisplay(window, displayBounds: display))
     }
 
     @MainActor

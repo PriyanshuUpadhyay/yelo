@@ -10,7 +10,7 @@ import os
 from . import core, create
 from ..usage import snapshot
 
-CLI_CHOICES = ("claude", "codex", "prime")
+CLI_CHOICES = ("claude", "codex")
 
 
 def usage_rows():
@@ -50,7 +50,7 @@ def command_sessions(args):
 def register(subparsers):
     parser = subparsers.add_parser(
         "profile",
-        help="account profiles for claude, codex, and prime-agent",
+        help="account profiles for claude and codex",
         description=core.__doc__.splitlines()[0],
     )
     group = parser.add_subparsers(dest="profile_command", required=True)
@@ -64,7 +64,7 @@ def register(subparsers):
     listing = add("list", command_list)
     listing.add_argument("--usage", action="store_true")
     listing.add_argument("--json", action="store_true")
-    add("menu", command_menu)
+    add("menu", command_menu).add_argument("--model", help="Claude startup model")
     # Sessions are a codex-only concept, so this one does not take the shared --cli choices.
     sessions = group.add_parser("sessions")
     sessions.add_argument("--cli", choices=("codex",), required=True)
@@ -76,7 +76,9 @@ def register(subparsers):
     resolving = add("resolve", core.command_resolve)
     resolving.add_argument("query")
     resolving.add_argument("--json", action="store_true")
-    add("pick", command_pick).add_argument("--json", action="store_true")
+    picking = add("pick", command_pick)
+    picking.add_argument("--json", action="store_true")
+    picking.add_argument("--model", help="Claude startup model")
     creating = add("create", create.command_create)
     # The wrappers send `create --cli CLI [options] -- NAME`, so a name that starts with a
     # dash reaches create.py and gets the shell's invalid-name refusal. An absent name is

@@ -9,11 +9,24 @@ resolves it, so a test cannot move HOME inside its own process. No test reads th
 from. Every epoch it writes is `now` plus a fixed offset that sits thirty seconds inside
 its minute and well away from an hour or day boundary, so the humanized `reset` strings
 are the same whichever second the fixture is built in.
+
+`bench` is the install-side twin: a temporary HOME, a fake ~/dotfiles to own things, and a
+`bin` directory first on a PATH that carries nothing else of ours. A test that needs a
+`herdr`, `swift`, or `git` writes a fake with `bench.fake(...)` and reads back the argv it
+was called with.
+
+Law L7 does not depend on a test remembering any of that: `sealed_home` is autouse, so
+every test in the suite -- including one that builds its own layout -- starts with HOME,
+`XDG_CACHE_HOME`, `XDG_STATE_HOME`, and `JELLO_DOTFILES_ROOT` inside a temporary tree and
+with a PATH that carries no `herdr`, `swift`, `claude`, `codex`, `agy`, or `node`.
 """
 
 import base64
+import hashlib
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -25,12 +38,78 @@ import pytest
 FALSE_BIN = "/usr/bin/false"
 TRUE_BIN = "/usr/bin/true"
 
+# The binaries jello shells out to. None of them may be reachable by name from a test
+# process: `herdr` would answer from the live server, `swift` would start a real build, and
+# the three providers would be launched for real. A test that needs one writes a fake and
+# puts it on PATH itself (`bench.fake`, the `hud` fixture, WatcherFixture).
+BLOCKED_BINARIES = ("herdr", "swift", "claude", "codex", "agy", "node")
+# The only directories a test's PATH keeps: the shell stubs need coreutils, `zsh`, and
+# `security`, and nothing the suite reaches for is installed anywhere else.
+SYSTEM_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+
 FIXTURE_ACCOUNTS = {
     "claude": [("pri", "pri@example.test"), ("work", "work@example.test")],
     "codex": [("base", "base@example.test", "pro", "acc-base"),
               ("alt", "alt@example.test", "plus", "acc-alt")],
     "prime": [("solo", "acc-alt")],
 }
+
+
+@pytest.fixture(scope="session")
+def sealed_path(tmp_path_factory):
+    """The system PATH with the six blocked binaries removed, wherever they live.
+
+    PATH cannot hide one name out of a directory, and /usr/bin holds `swift` next to the
+    coreutils the fixture shell stubs call, so a directory that holds a blocked name is
+    replaced by a symlink farm of everything else it holds. Everything outside the system
+    directories is dropped outright: that is where `herdr`, the three providers, and `node`
+    are installed on this machine. Built once per session.
+    """
+    farm = tmp_path_factory.mktemp("path")
+    blocked = set(BLOCKED_BINARIES)
+    entries = []
+    for directory in SYSTEM_PATH:
+        names = set(os.listdir(directory)) if os.path.isdir(directory) else set()
+        if not names & blocked:
+            entries.append(directory)
+            continue
+        mirror = farm / directory.strip("/").replace("/", "-")
+        mirror.mkdir()
+        for name in sorted(names - blocked):
+            (mirror / name).symlink_to(os.path.join(directory, name))
+        entries.append(str(mirror))
+    return os.pathsep.join(entries)
+
+
+@pytest.fixture(autouse=True)
+def sealed_home(tmp_path_factory, monkeypatch, sealed_path):
+    """Law L7 for the whole suite, rather than one test at a time (F29).
+
+    Every test starts with HOME, the three XDG roots, and `JELLO_DOTFILES_ROOT` inside a
+    temporary tree, and with a PATH that carries none of the six binaries jello shells out
+    to: a test that forgets to move HOME still cannot read the real ~/.claude or ~/.codex,
+    and no test can reach the live Herdr, start a Swift build, or launch a provider. The
+    fixtures below still set the same variables explicitly for the subprocess they run --
+    this is the floor, not their replacement, and a test that wants one of the six writes a
+    fake and puts it on PATH itself.
+    """
+    sealed = tmp_path_factory.mktemp("sealed")
+    home = sealed / "home"
+    home.mkdir()
+    (sealed / "dotfiles" / "home").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
+    monkeypatch.setenv("JELLO_DOTFILES_ROOT", str(sealed / "dotfiles"))
+    monkeypatch.setenv("PATH", sealed_path)
+    # /usr/bin/python3 is Apple's, and it caches its bytecode under
+    # $HOME/Library/Caches/com.apple.python: a write into the HOME under test that no test
+    # asked for. The stubs run whatever `env python3` finds, so the switch goes here.
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    for name in BLOCKED_BINARIES:
+        assert shutil.which(name) is None, f"{name} is still reachable from a test"
+    return home
 
 
 def jwt(payload):
@@ -253,3 +332,121 @@ def jello(fixture_home):
 
     call.home = fixture_home
     return call
+
+
+# --- the install bench --------------------------------------------------------------------
+# The bench PATH is the fake-binary directory and nothing else. macOS ships `swift` in
+# /usr/bin, so a PATH with the system directories on it would let a test start a real build
+# (and a machine with `herdr` installed would let one reach the live server). Tests run
+# jello through `sys.executable`, which is absolute, so nothing here needs more; a test that
+# wants `git`, `herdr`, or `swift` writes its own with `bench.fake(...)`.
+# A settings.json shaped like a live one. jello writes none of it: the only row read out of
+# it is `agents`, which asks whether some SessionStart group runs agent-host-context.py.
+SEEDED_SETTINGS = {
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "model": "opus",
+    "permissions": {"allow": ["Bash"]},
+    "hooks": {
+        "PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "$HOME/.claude/hooks/bash-guard.sh"}]}],
+        "SessionStart": [{"hooks": [
+            {"type": "command", "command": "$HOME/.claude/hooks/session-model-cache.sh"},
+            {"type": "command", "command": "~/.claude/scripts/agent-host-context.py"}]}],
+        "UserPromptSubmit": [{"hooks": [
+            {"type": "command", "command": "$HOME/.claude/scripts/context-nudge.sh"}]}],
+    },
+    "statusLine": {"type": "command", "command": "statusline.sh"},
+}
+
+
+def tree_digest(root):
+    """Path, kind, mode, and content of everything under root -- but never an mtime, so a
+    pure touch would show up and a re-read would not."""
+    digest = hashlib.sha256()
+    for base, directories, files in os.walk(root, followlinks=False):
+        directories.sort()
+        for name in sorted(directories + files):
+            path = os.path.join(base, name)
+            relative = os.path.relpath(path, root)
+            mode = stat.S_IMODE(os.lstat(path).st_mode)
+            if os.path.islink(path):
+                digest.update(f"L {relative} {mode} {os.readlink(path)}\n".encode())
+            elif os.path.isdir(path):
+                digest.update(f"D {relative} {mode}\n".encode())
+            else:
+                digest.update(f"F {relative} {mode} ".encode())
+                digest.update(hashlib.sha256(open(path, "rb").read()).hexdigest().encode())
+                digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def env_for(home, dotfiles, binaries=None, **overrides):
+    """The bench environment. `binaries` is the fake-binary directory that becomes the whole
+    PATH; the HUD suite passes none and keeps the machine's PATH, because its targets are a
+    real `swift` and a real `codesign`."""
+    env = {
+        "HOME": str(home),
+        "PATH": str(binaries) if binaries is not None else os.environ.get("PATH", ""),
+        "XDG_CACHE_HOME": os.path.join(str(home), ".cache"),
+        "XDG_CONFIG_HOME": os.path.join(str(home), ".config"),
+        "XDG_STATE_HOME": os.path.join(str(home), ".local", "state"),
+        "JELLO_DOTFILES_ROOT": str(dotfiles),
+    }
+    env.update(overrides)
+    return env
+
+
+@pytest.fixture
+def bench(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    dotfiles = tmp_path / "dotfiles"
+    (dotfiles / "home" / ".claude" / "hooks").mkdir(parents=True)
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+
+    class Bench:
+        def __init__(self):
+            self.home = home
+            self.dotfiles = dotfiles
+            self.bin = binaries
+            self.settings = home / ".claude" / "settings.json"
+            self.profiles = home / ".claude" / ".profiles"
+            self.launchers = home / ".local" / "bin"
+            self.state = home / ".local" / "state"
+
+        def run(self, *argv, **overrides):
+            return run_jello(list(argv), env_for(home, dotfiles, binaries, **overrides))
+
+        def rows(self, result):
+            return {line.split("\t")[0]: line.split("\t")[1]
+                    for line in result.stdout.splitlines() if "\t" in line}
+
+        def seed_settings(self, data):
+            self.settings.parent.mkdir(parents=True, exist_ok=True)
+            self.settings.write_text(json.dumps(data, indent=2) + "\n")
+
+        def parsed(self):
+            return json.loads(self.settings.read_text())
+
+        def digest(self):
+            return tree_digest(home)
+
+        def fake(self, name, body="exit 0"):
+            """An executable that records its argv, one shell-quoted line per call, so a
+            test can assert what jello asked for without a real binary existing."""
+            path = binaries / name
+            log = binaries / f"{name}.log"
+            path.write_text(
+                "#!/bin/sh\n"
+                f'printf "%s\\n" "$*" >> {log}\n'
+                f"{body}\n"
+            )
+            path.chmod(0o755)
+            return path
+
+        def calls(self, name):
+            log = binaries / f"{name}.log"
+            return log.read_text().splitlines() if log.exists() else []
+
+    return Bench()

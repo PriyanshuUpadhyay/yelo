@@ -1,19 +1,14 @@
-"""The `jello` root command: one parser, seven groups, one error shape.
-
-Each group owns its own subcommand and registers it here. An ImportError raised while a
-group loads is a broken install, so it surfaces as a traceback rather than as a command
-that quietly goes missing.
-"""
+"""The Jello CLI: Claude and Codex profiles, usage, and UsageHUD."""
 
 import argparse
 import sys
 
-from . import __version__, doctor, hud, resume, setup, shell
+from . import __version__, doctor, hud, maintenance, setup
 from .profile import commands as profile_commands
 from .usage import commands as usage_commands
 
 # The order is the order in --help.
-GROUPS = (profile_commands, usage_commands, resume, shell, setup, doctor, hud)
+GROUPS = (profile_commands, usage_commands, setup, doctor, hud, maintenance)
 
 
 def fail(command, message, path=None):

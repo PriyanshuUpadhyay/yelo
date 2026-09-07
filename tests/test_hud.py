@@ -191,7 +191,7 @@ def test_install_bundle_and_plist(hud):
         "Label": LABEL,
         "ProgramArguments": [str(hud.binary)],
         "RunAtLoad": True,
-        "KeepAlive": True,
+        "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": str(hud.home / "Library" / "Logs" / "jello-hud.out.log"),
         "StandardErrorPath": str(hud.home / "Library" / "Logs" / "jello-hud.err.log"),
         # launchd gives the job no PATH, so the absolute launcher is the whole point.

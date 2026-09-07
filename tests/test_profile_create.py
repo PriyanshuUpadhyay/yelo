@@ -26,27 +26,25 @@ def test_create_each_cli(jello):
     real_agents = home / "real-AGENTS.md"
     real_agents.write_text("house rules\n")
     (home / ".codex" / "AGENTS.md").symlink_to(real_agents)
-    # The prime creator links these from the base agent home; the absent ones are skipped.
-    base = home / ".prime" / "agent"
-    base.mkdir(parents=True)
-    (base / "settings.json").write_text("{}\n")
-    (base / "bin").mkdir()
-
     result = jello("profile", "create", "--cli", "claude", "zed",
                    "--email", "zed@example.test", "--yes")
     assert result.returncode == 0, result.stderr
-    assert result.stdout == (
-        "Created profile 'zed'. Sign in with: claude --profile zed auth login\n"
-    )
+    # The launcher is written last and named in the line, so `claude-zed` is a command the
+    # moment the folder exists (ADR 0005).
+    assert result.stdout.splitlines()[0] == (
+        "Created profile 'zed'. Sign in with: claude-zed auth login")
+    launcher = home / ".local" / "bin" / "claude-zed"
+    assert result.stdout.splitlines()[1] == f"Wrote {launcher}."
+    assert launcher.read_text().splitlines()[1].endswith("account zed")
     directory = home / ".claude" / ".profiles" / "zed"
     assert mode(directory) == 0o700
     assert (directory / "email").read_text() == "zed@example.test\n"
 
     result = jello("profile", "create", "--cli", "codex", "zeta", "--yes")
     assert result.returncode == 0, result.stderr
-    assert result.stdout == (
-        "Created profile 'zeta'. Sign in with: codex --profile zeta login\n"
-    )
+    assert result.stdout.splitlines()[0] == (
+        "Created profile 'zeta'. Sign in with: codex-zeta login")
+    assert result.stdout.splitlines()[1] == f"Wrote {home / '.local' / 'bin' / 'codex-zeta'}."
     directory = home / ".codex-zeta"
     assert mode(directory) == 0o700
     assert mode(directory / "sessions") == 0o700
@@ -55,21 +53,6 @@ def test_create_each_cli(jello):
     assert link_to(directory / "hooks.json") == os.path.realpath(home / ".codex" / "hooks.json")
     assert link_to(directory / "AGENTS.md") == os.path.realpath(real_agents)
 
-    result = jello("profile", "create", "--cli", "prime", "zeta", "--yes")
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == (
-        "Created profile 'zeta'. Start it with 'prime-agent --profile zeta', "
-        "then run /login.\n"
-    )
-    directory = home / ".prime" / "agent-zeta"
-    assert mode(directory) == 0o700
-    assert (directory / "auth.json").read_text() == "{}\n"
-    assert mode(directory / "auth.json") == 0o600
-    assert link_to(directory / "settings.json") == os.path.realpath(base / "settings.json")
-    assert link_to(directory / "bin") == os.path.realpath(base / "bin")
-    for absent in ("extensions", "skills", "harness"):
-        assert not (directory / absent).exists()
-
     # The new homes are accounts now, so the resolver counts them.
     listed = jello("profile", "list", "--cli", "codex")
     assert "zeta" in listed.stdout
@@ -77,15 +60,13 @@ def test_create_each_cli(jello):
 
 REFUSALS = [
     (["--cli", "claude", "bad name"], 2, "claude: invalid profile name: bad name"),
-    (["--cli", "prime", "bad name"], 2, "prime-agent: invalid profile name: bad name"),
     # R9: the label rule is ASCII, whatever the locale calls alphanumeric.
     (["--cli", "claude", "é"], 2, "claude: invalid profile name: é"),
     (["--cli", "codex", "é"], 2, "codex: invalid profile name: é"),
-    (["--cli", "prime", "é"], 2, "prime-agent: invalid profile name: é"),
     (["--cli", "claude", "ok", "--email", "--yes"], 2,
      "claude: --email requires an address"),
     (["--cli", "codex", "ok", "--email", "a@b.test", "--yes"], 2,
-     "usage: codex profile create NAME [--yes]"),
+     "usage: jello profile create --cli codex NAME [--yes]"),
     (["--cli", "claude", "pri", "--yes"], 1, "claude: profile already exists: pri"),
     (["--cli", "claude", "wor", "--yes"], 1,
      "claude: 'wor' already identifies an existing account"),
@@ -94,6 +75,67 @@ REFUSALS = [
     (["--cli", "codex", "fresh"], 2,
      "codex: confirmation required; rerun with --yes in a non-interactive shell"),
 ]
+
+
+def test_create_refuses_a_command_somebody_else_owns(jello):
+    """R8-F2: the success line names `claude-zed`, so a foreign file at that path makes the
+    line a lie. The refusal comes before anything is made, and the home stays absent."""
+    home = pathlib.Path(jello.home)
+    launcher = home / ".local" / "bin" / "claude-zed"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/sh\necho mine\n")
+
+    result = jello("profile", "create", "--cli", "claude", "zed", "--yes")
+    assert result.returncode == 1
+    assert result.stderr == (
+        f"claude: 'zed' would need a command somebody else owns: {launcher}\n")
+    assert result.stdout == ""
+    assert not (home / ".claude" / ".profiles" / "zed").exists()
+    assert launcher.read_text() == "#!/bin/sh\necho mine\n"
+
+
+def test_create_refuses_a_symlink_even_to_one_of_our_own_launchers(jello):
+    """R8-F2's remaining case: a symlink whose target carries the jello header read as
+    `ours` through the link, so create replaced the link with a regular file and orphaned
+    whatever it pointed at. A symlink at a launcher path is always somebody else's."""
+    home = pathlib.Path(jello.home)
+    binaries = home / ".local" / "bin"
+    binaries.mkdir(parents=True, exist_ok=True)
+    real = binaries / "claude-pri"
+    real.write_text("#!/bin/sh\n# written by jello setup launchers: account pri\n"
+                    "exec env AGENT_PROFILE_LABEL=pri claude \"$@\"\n")
+    real.chmod(0o755)
+    link = binaries / "claude-zed"
+    link.symlink_to(real)
+
+    result = jello("profile", "create", "--cli", "claude", "zed", "--yes")
+    assert result.returncode == 1
+    assert result.stderr == (
+        f"claude: 'zed' would need a command somebody else owns: {link}\n")
+    assert result.stdout == ""
+    assert not (home / ".claude" / ".profiles" / "zed").exists()
+    assert link.is_symlink(), "the link itself must survive"
+    assert link.resolve() == real.resolve(), "and still point where it pointed"
+
+
+def test_a_launcher_that_cannot_be_written_is_reported(jello):
+    """R8-F2, the other half: the home exists by then, so the failure is named rather than
+    swallowed, and it says what finishes the job."""
+    home = pathlib.Path(jello.home)
+    binaries = home / ".local" / "bin"
+    binaries.mkdir(parents=True, exist_ok=True)
+    binaries.chmod(0o500)
+    try:
+        result = jello("profile", "create", "--cli", "claude", "zed", "--yes")
+    finally:
+        binaries.chmod(0o700)
+
+    assert result.returncode == 1
+    assert result.stderr.startswith("claude: created ")
+    assert "its launcher could not be written" in result.stderr
+    assert "jello setup launchers" in result.stderr
+    # The account itself was made, which is exactly what the message says.
+    assert (home / ".claude" / ".profiles" / "zed").is_dir()
 
 
 def test_create_refusals(jello):
@@ -112,12 +154,10 @@ def test_create_refusals(jello):
 DASH_NAMES = [
     ("claude", "claude: invalid profile name: -bad"),
     ("codex", "codex: invalid profile name: -bad"),
-    ("prime", "prime-agent: invalid profile name: -bad"),
 ]
 ABSENT_NAMES = [
-    ("claude", "usage: claude profile create NAME [--email ADDR] [--yes]"),
-    ("codex", "usage: codex profile create NAME [--yes]"),
-    ("prime", "usage: prime-agent profile create NAME [--yes]"),
+    ("claude", "usage: jello profile create --cli claude NAME [--email ADDR] [--yes]"),
+    ("codex", "usage: jello profile create --cli codex NAME [--yes]"),
 ]
 
 

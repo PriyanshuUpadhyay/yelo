@@ -21,7 +21,7 @@ from conftest import (build_census_home, build_usage_home, fixture_env, run_jell
 ROOT = pathlib.Path(__file__).parent.parent
 GOLDEN = ROOT / "tests" / "golden"
 SOURCE = ROOT / "src" / "jello"
-CLIS = ("claude", "codex", "prime")
+CLIS = ("claude", "codex")
 # The signed label rule (R9), written out here rather than imported, so the census counts
 # by the rule instead of by the same function the code under test uses.
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -133,7 +133,12 @@ def test_public_apis_only():
 
 def test_stdlib_only():
     """R1: jello runs on every prompt through a shell hook, so it may not import anything
-    that is not already in the interpreter."""
+    that is not already in the interpreter.
+
+    `sys.stdlib_module_names` is the interpreter's own answer, and the interpreter is the
+    one `.python-version` pins, so this needs no allowance list: `tomllib` is standard
+    library from 3.11 and the floor is 3.11 (ADR 0002, amended 2026-09-03).
+    """
     outside = {}
     for path in sorted(SOURCE.rglob("*.py")):
         extra = sorted(
@@ -145,11 +150,89 @@ def test_stdlib_only():
     assert outside == {}
 
 
+def test_the_python_floor_is_declared_in_one_place_and_met():
+    """F11: `requires-python`, `.python-version`, and the interpreter running the tests all
+    have to agree, or the canary's tomllib import is a dependency again on somebody's
+    machine."""
+    declared = None
+    for line in (ROOT / "pyproject.toml").read_text().splitlines():
+        if line.startswith("requires-python"):
+            declared = line.split("=", 1)[1].strip().strip('"')
+    assert declared == ">=3.11", declared
+    assert (ROOT / ".python-version").read_text().strip() == "3.11"
+    assert sys.version_info >= (3, 11), sys.version
+    assert "tomllib" in sys.stdlib_module_names
+
+
+# Public commands in help order. Vendor launches need none of these at runtime.
+GROUPS = ("profile", "usage", "setup", "doctor", "hud", "update", "release")
+# What each group offers, and nothing else.
+SUBCOMMANDS = {
+    "usage": ("show", "fetch", "doctor"),
+    "hud": ("install", "start", "stop"),
+}
+
+
 def test_help_lists_every_group(jello):
     result = jello("--help")
     assert result.returncode == 0
-    for group in ("profile", "usage", "resume", "shell-init", "setup", "doctor", "hud"):
+    for group in GROUPS:
         assert group in result.stdout
+
+
+def test_supported_groups_registered(jello):
+    """C01: the groups are on the root parser, in order, and each one lists exactly the
+    subcommands R1 names."""
+    root = jello("--help")
+    assert root.returncode == 0
+    assert choice_list(root.stdout) == list(GROUPS), root.stdout
+
+    for group, expected in SUBCOMMANDS.items():
+        result = jello(group, "--help")
+        assert result.returncode == 0, result.stderr
+        listed = subcommands_of(result.stdout)
+        assert listed == set(expected), (group, listed)
+
+
+def choice_list(text):
+    """The names argparse prints inside the `{a,b,c}` choice line of a subparser, in the
+    order it prints them -- which is the order the groups were registered."""
+    match = re.search(r"\{([a-z0-9,\-]+)\}", text)
+    assert match, text
+    return match.group(1).split(",")
+
+
+def subcommands_of(text):
+    return set(choice_list(text))
+
+
+def test_help_needs_no_host(tmp_path):
+    """C32: `--help` works on a machine with no Herdr at all -- no binary on PATH, no
+    HERDR_* in the environment, and no socket. Importing a group may not need a host."""
+    env = {"HOME": str(tmp_path), "PATH": str(tmp_path)}
+    for argv in (["--help"], ["profile", "--help"], ["usage", "--help"],
+                 ["setup", "--help"], ["doctor", "--help"], ["hud", "--help"]):
+        result = run_jello(argv, env)
+        assert result.returncode == 0, (argv, result.stderr)
+        assert result.stdout
+
+
+def test_version(jello):
+    """C01: the version R1 names."""
+    result = jello("--version")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "jello 0.3.0"
+
+
+# --- the trailing-argv hook (board A3, chair ruling cli-extras-hook) -----------------------
+
+
+def test_a_subcommand_without_the_hook_gets_argparses_own_error(tmp_path):
+    """Every other subcommand keeps argparse's message and its exit 2, unchanged."""
+    env = {"HOME": str(tmp_path), "PATH": str(tmp_path)}
+    result = run_jello(["doctor", "--nope"], env)
+    assert result.returncode == 2
+    assert "unrecognized arguments: --nope" in result.stderr
 
 
 ENUMERATORS = {"glob", "listdir", "scandir", "iterdir"}
@@ -245,8 +328,8 @@ def test_version_is_the_package_version(jello):
 
 
 def jello_version():
-    """pyproject.toml and __init__.py both carry the version; the shell-init cache is keyed
-    by it, so they may not drift apart."""
+    """pyproject.toml and __init__.py both carry the version, and `--version` prints it, so
+    they may not drift apart."""
     text = (ROOT / "pyproject.toml").read_text()
     for line in text.splitlines():
         if line.startswith("version = "):

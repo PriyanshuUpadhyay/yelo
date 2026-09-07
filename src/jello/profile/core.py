@@ -1,16 +1,16 @@
-"""One identity resolver for the claude, codex, and Prime Agent account profiles.
+"""One identity resolver for the claude and codex account profiles.
 
-A row is one account: canonical name, home dir, email, plan (codex/Prime), aliases.
+A row is one account: canonical name, home dir, email, plan (codex), aliases.
 A query matches by exact name, alias, exact email, or a unique case-insensitive
 substring of either. There is deliberately NO default and NO fallback profile —
 an unmatched (exit 1) or ambiguous (exit 2) query is an error, because silently
 landing on the wrong account spends the wrong subscription.
 
 Subcommands (wired by jello.profile.commands as `jello profile ...`):
-  list    --cli claude|codex|prime [--usage] [--json]   all rows, aligned table or JSON
-  menu    --cli claude|codex|prime                      picker rows: index/name/dir/display (TAB)
-  resolve --cli claude|codex|prime QUERY [--json]       name<TAB>dir, or JSON
-  pick    --cli claude|codex|prime [--json]             the account about to waste the most usage
+  list    --cli claude|codex [--usage] [--json]   all rows, aligned table or JSON
+  menu    --cli claude|codex                      picker rows: index/name/dir/display (TAB)
+  resolve --cli claude|codex QUERY [--json]       name<TAB>dir, or JSON
+  pick    --cli claude|codex [--json]             the account about to waste the most usage
   sessions --cli codex [--all] [--limit N] [--json]     recent sessions, newest first, each
                                                         with the account that owns it
 
@@ -19,7 +19,7 @@ from `jello.usage.snapshot` and passes in, falling back to each account's own us
 cache; it costs a pass over the cache files, so the resolve hot path never asks for it.
 
 AGENT_PROFILES_CLAUDE_ROOT, AGENT_PROFILES_CODEX_GLOB_ROOT,
-AGENT_PROFILES_PRIME_GLOB_ROOT, and AGENT_PROFILES_SECURITY_BIN relocate the roots and
+and AGENT_PROFILES_SECURITY_BIN relocate the roots and
 the Keychain probe for tests only.
 """
 
@@ -29,6 +29,7 @@ import glob
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -38,12 +39,10 @@ HOME = os.path.expanduser("~")
 KEYCHAIN_TIMEOUT_SECONDS = 10
 CODEX_BASE = ".codex"
 CODEX_PREFIX = ".codex-"
-PRIME_BASE = "agent"
-PRIME_PREFIX = "agent-"
 # Same rule the shell creators enforce, so a name can never be a path fragment, an option, or
 # carry the tab this tool's own output uses as a field separator.
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
-WINDOW_HOURS = {"5h": 5.0, "7d": 168.0}
+WINDOW_HOURS = {"5h": 5.0, "7d": 168.0, "fb": 168.0}
 # Floor on the fraction of a window still to run, so a window seconds from reset cannot
 # produce an unbounded urgency and drown every other signal.
 MIN_TIME_FRACTION = 0.02
@@ -73,10 +72,6 @@ def claude_root():
 
 def codex_root():
     return os.environ.get("AGENT_PROFILES_CODEX_GLOB_ROOT") or HOME
-
-
-def prime_root():
-    return os.environ.get("AGENT_PROFILES_PRIME_GLOB_ROOT") or os.path.join(HOME, ".prime")
 
 
 def first_line(path):
@@ -126,7 +121,7 @@ def claude_email(directory):
     return None
 
 
-def claude_rows():
+def claude_rows(*, include_identity=True):
     root = claude_root()
     aliases = alias_map(root)
     try:
@@ -141,7 +136,7 @@ def claude_rows():
         rows.append({
             "name": name,
             "dir": directory,
-            "email": claude_email(directory),
+            "email": claude_email(directory) if include_identity else None,
             "aliases": sorted(old for old, new in aliases.items() if new == name),
         })
     return rows
@@ -183,26 +178,8 @@ def codex_identity(directory):
     return payload.get("email") or None, plan or None, signed_in
 
 
-def token_account_id(token):
-    payload = jwt_payload(token)
-    claims = payload.get("https://api.openai.com/auth") if isinstance(payload, dict) else None
-    account_id = claims.get("chatgpt_account_id") if isinstance(claims, dict) else None
-    return account_id if isinstance(account_id, str) and account_id else None
-
-
-def codex_account_id(directory):
-    auth = read_json(os.path.join(directory, "auth.json"))
-    tokens = auth.get("tokens") if isinstance(auth, dict) else None
-    if not isinstance(tokens, dict):
-        return None
-    account_id = tokens.get("account_id")
-    if isinstance(account_id, str) and account_id:
-        return account_id
-    return token_account_id(tokens.get("access_token"))
-
-
-def codex_row(directory, name):
-    email, plan, signed_in = codex_identity(directory)
+def codex_row(directory, name, *, include_identity=True):
+    email, plan, signed_in = codex_identity(directory) if include_identity else (None, None, None)
     return {
         "name": name if valid_name(name) else None,
         "dir": directory,
@@ -213,18 +190,19 @@ def codex_row(directory, name):
     }
 
 
-def codex_rows():
+def codex_rows(*, include_identity=True):
     root = codex_root()
     rows = []
     base = os.path.join(root, CODEX_BASE)
     # An unusable label leaves the base home nameless rather than hiding it: it stays
     # reachable by email, and by the picker.
     if os.path.isdir(base) and emittable(base):
-        rows.append(codex_row(base, first_line(os.path.join(base, "profile-label"))))
+        rows.append(codex_row(base, first_line(os.path.join(base, "profile-label")),
+                              include_identity=include_identity))
     for directory in sorted(glob.glob(os.path.join(root, CODEX_PREFIX + "*"))):
         name = os.path.basename(directory)[len(CODEX_PREFIX):]
         if os.path.isdir(directory) and emittable(directory) and valid_name(name):
-            rows.append(codex_row(directory, name))
+            rows.append(codex_row(directory, name, include_identity=include_identity))
     return rows
 
 
@@ -295,70 +273,12 @@ def codex_session_rows(limit, everywhere, cwd):
     return rows
 
 
-def prime_identity(directory):
-    auth = read_json(os.path.join(directory, "auth.json"))
-    credential = auth.get("openai-codex") if isinstance(auth, dict) else None
-    if not isinstance(credential, dict):
-        return None, False
-    if credential.get("type") == "oauth":
-        access = credential.get("access")
-        account_id = credential.get("accountId") or token_account_id(access)
-        return account_id, isinstance(access, str) and bool(access)
-    if credential.get("type") == "api_key":
-        key = credential.get("key")
-        return token_account_id(key), isinstance(key, str) and bool(key)
-    return None, False
-
-
-def codex_quota_rows():
-    rows = []
-    for row in codex_rows():
-        account_id = codex_account_id(row["dir"])
-        if account_id:
-            rows.append((account_id, row))
-    return rows
-
-
-def prime_row(directory, name, quotas):
-    account_id, signed_in = prime_identity(directory)
-    matches = [row for candidate_id, row in quotas if candidate_id == account_id]
-    quota = next((row for row in matches if row.get("name") == name), None)
-    if quota is None and len(matches) == 1:
-        quota = matches[0]
-    canonical_name = name if valid_name(name) else (quota.get("name") if quota else None)
-    return {
-        "name": canonical_name,
-        "dir": directory,
-        "email": quota.get("email") if quota else None,
-        "plan": quota.get("plan") if quota else None,
-        "signed_in": signed_in,
-        "aliases": [],
-        "usage_dir": quota.get("dir") if quota else None,
-        "usage_name": quota.get("name") if quota else None,
-    }
-
-
-def prime_rows():
-    root = prime_root()
-    quotas = codex_quota_rows()
-    rows = []
-    base = os.path.join(root, PRIME_BASE)
-    if os.path.isdir(base) and emittable(base):
-        name = first_line(os.path.join(base, "profile-label")) or PRIME_BASE
-        rows.append(prime_row(base, name, quotas))
-    for directory in sorted(glob.glob(os.path.join(root, PRIME_PREFIX + "*"))):
-        name = os.path.basename(directory)[len(PRIME_PREFIX):]
-        if os.path.isdir(directory) and emittable(directory) and valid_name(name):
-            rows.append(prime_row(directory, name, quotas))
-    return rows
-
-
 def rows_for(cli):
     if cli == "claude":
         return claude_rows()
     if cli == "codex":
         return codex_rows()
-    return prime_rows()
+    raise ValueError(f"unsupported provider: {cli}")
 
 
 class ResolveError(Exception):
@@ -431,7 +351,7 @@ def hud_label(cli, row):
     one."""
     if cli == "claude":
         return f"cl·{row['name']}"
-    name = row.get("usage_name") if cli == "prime" else row.get("name")
+    name = row.get("name")
     return f"cx·{name}" if name else "cx"
 
 
@@ -465,12 +385,8 @@ def usage_data_labels(cli, row):
     if cli == "claude":
         name = row.get("name")
         return [f"cl·{name}"] if name else []
-    if cli == "prime":
-        name = row.get("usage_name")
-        directory = row.get("usage_dir")
-    else:
-        name = row.get("name")
-        directory = row.get("dir")
+    name = row.get("name")
+    directory = row.get("dir")
     labels = [f"cx·{name}"] if name else []
     if directory and os.path.basename(directory) == CODEX_BASE:
         labels.append("cx")
@@ -488,13 +404,74 @@ def parse_reset_hours(text):
     return days * 24 + hours + minutes / 60
 
 
-def usage_data_windows(cli, row, usage_data):
+def claude_model(args=()):
+    """Read startup model choices without changing Claude settings or starting Claude.
+
+    Covers local user/project settings and explicit startup overrides. Remote enterprise
+    policy and models restored from a transcript remain Claude's responsibility.
+    """
+    options = {}
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        key, separator, value = arg.partition("=")
+        if key in ("--model", "--settings", "--setting-sources"):
+            if not separator:
+                index += 1
+                if index >= len(args):
+                    raise ResolveError(f"claude: {key} requires a value", 2)
+                value = args[index]
+            options[key] = value
+        index += 1
+    cwd = Path.cwd()
+    project = next((parent for parent in (cwd, *cwd.parents)
+                    if (parent / ".git").exists()), cwd)
+    directory = Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"))
+    sources = options.get("--setting-sources", "user,project,local").split(",")
+    settings = {}
+    environment = {}
+    for source, path in (("user", directory / "settings.json"),
+                         ("project", project / ".claude/settings.json"),
+                         ("local", project / ".claude/settings.local.json")):
+        data = read_json(path) if source in sources else None
+        if isinstance(data, dict):
+            settings.update(data)
+            if isinstance(data.get("env"), dict):
+                environment.update(data["env"])
+    if "--settings" in options:
+        value = options["--settings"]
+        try:
+            data = json.loads(value) if value.lstrip().startswith("{") else read_json(value)
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            raise ResolveError("claude: cannot read --settings for account selection", 2)
+        settings.update(data)
+        if isinstance(data.get("env"), dict):
+            environment.update(data["env"])
+    environment.update(os.environ)
+    model = (options.get("--model") or environment.get("ANTHROPIC_MODEL") or
+             settings.get("model") or environment.get("ANTHROPIC_DEFAULT_MODEL") or "default")
+    if not isinstance(model, str):
+        raise ResolveError("claude: model must be a string", 2)
+    family = model.lower().split("[", 1)[0]
+    if family in ("fable", "opus", "sonnet", "haiku"):
+        model = environment.get(f"ANTHROPIC_DEFAULT_{family.upper()}_MODEL") or model
+    return model
+
+
+def fable_model(model):
+    return isinstance(model, str) and ("fable" in model.lower() or model.lower().split("[", 1)[0] == "best")
+
+
+def usage_data_windows(cli, row, usage_data, include_fable=False):
     """(used percent, hours to reset) per window, from the first usage data label that has rows."""
     for label in usage_data_labels(cli, row):
-        provider = "codex" if cli == "prime" else cli
         matched = [
             entry for entry in usage_data
-            if entry.get("provider") == provider and entry.get("label") == label
+            if entry.get("provider") == cli and entry.get("label") == label
         ]
         if not matched:
             continue
@@ -502,7 +479,7 @@ def usage_data_windows(cli, row, usage_data):
         for entry in matched:
             window = entry.get("window")
             pct = entry.get("pct")
-            if window not in ("5h", "7d") or entry.get("state") == "offline":
+            if window not in (("5h", "7d", "fb") if include_fable else ("5h", "7d")) or entry.get("state") == "offline":
                 continue
             if isinstance(pct, bool) or not isinstance(pct, (int, float)):
                 continue
@@ -534,16 +511,15 @@ def hours_until(resets_at, window):
     return WINDOW_HOURS[window] if left <= 0 else left / 3600
 
 
-def cache_windows(cli, row):
+def cache_windows(cli, row, include_fable=False):
     """The account's own usage snapshot, for when the usage data feed has no row for it."""
-    directory = row.get("usage_dir") if cli == "prime" else row["dir"]
+    directory = row["dir"]
     if not directory:
         return None
     windows = {}
     if cli == "claude":
         cache = read_json(os.path.join(directory, ".usage-api-cache.json"))
-        if not isinstance(cache, dict):
-            return None
+        cache = cache if isinstance(cache, dict) else {}
         for window, key in (("5h", "five_hour"), ("7d", "seven_day")):
             entry = cache.get(key)
             if not isinstance(entry, dict):
@@ -551,6 +527,13 @@ def cache_windows(cli, row):
             pct = used_percent(entry.get("used_percentage"), entry.get("resets_at"))
             if pct is not None:
                 windows[window] = (pct, hours_until(entry.get("resets_at"), window))
+        if include_fable:
+            cache = read_json(os.path.join(directory, ".usage-api-cache-fable.json"))
+            entry = cache.get("seven_day") if isinstance(cache, dict) else None
+            if isinstance(entry, dict):
+                pct = used_percent(entry.get("used_percentage"), entry.get("resets_at"))
+                if pct is not None:
+                    windows["fb"] = (pct, hours_until(entry.get("resets_at"), "fb"))
         return windows or None
     cache = read_json(os.path.join(directory, ".usage-hud-api-cache.json"))
     limits = cache.get("rate_limits") if isinstance(cache, dict) else None
@@ -566,7 +549,6 @@ def cache_windows(cli, row):
         window = "5h" if isinstance(minutes, (int, float)) and minutes <= 300 else "7d"
         windows[window] = (pct, hours_until(entry.get("resets_at"), window))
     return windows or None
-
 
 def urgency(windows):
     """Fraction left divided by the fraction of the window still to run, best window wins.
@@ -584,27 +566,29 @@ def urgency(windows):
     return best
 
 
-def add_usage(cli, rows, usage_rows):
+def add_usage(cli, rows, usage_rows, include_fable=False):
     """Adds `usage` (display text), `remaining` (min percent left, None = unknown), and
-    `urgency` (see urgency(); None when remaining is unknown).
+    `urgency` (see urgency(); None when remaining is unknown). With include_fable,
+    adds a hard exclusion flag from the model-specific API window, not statusline data.
 
     `usage_rows` is the Usage HUD snapshot the caller took (jello.profile.commands reads it
     from jello.usage.snapshot), or None when no snapshot could be taken at all — this
     module never reaches for it itself, so core stays free of any jello.usage import."""
     usage_data = usage_rows
     for row in rows:
-        if cli == "prime" and not row.get("usage_dir"):
-            row["usage"] = "quota account not found"
-            row["remaining"] = None
-            row["urgency"] = None
-            continue
-        windows = usage_data_windows(cli, row, usage_data) if usage_data is not None else None
+        windows = usage_data_windows(cli, row, usage_data, include_fable) if usage_data is not None else None
         if not windows:
-            windows = cache_windows(cli, row)
+            windows = cache_windows(cli, row, include_fable)
+        elif include_fable and "fb" not in windows:
+            cached = cache_windows(cli, row, True) or {}
+            if "fb" in cached:
+                windows["fb"] = cached["fb"]
+        if include_fable:
+            row["fable_exhausted"] = bool(windows and "fb" in windows and windows["fb"][0] >= 100)
         if windows:
             row["usage"] = " · ".join(
                 f"{window} {int(round(100 - windows[window][0]))}% left"
-                for window in ("5h", "7d") if window in windows
+                for window in ("5h", "7d", "fb") if window in windows
             )
             row["remaining"] = int(round(min(100 - used for used, _ in windows.values())))
             row["urgency"] = round(urgency(windows), 3)
@@ -619,17 +603,16 @@ def add_usage(cli, rows, usage_rows):
             row["urgency"] = 1.0
     return rows
 
-
 def columns(cli, rows, usage):
     header = ["NAME", "EMAIL"]
-    if cli in ("codex", "prime"):
+    if cli == "codex":
         header.append("PLAN")
     if usage:
         header.append("USAGE")
     body = []
     for row in rows:
         line = [row["name"] or "-", row["email"] or "-"]
-        if cli in ("codex", "prime"):
+        if cli == "codex":
             line.append(row.get("plan") or "-")
         if usage:
             line.append("not signed in" if row.get("signed_in") is False
@@ -708,7 +691,9 @@ def command_menu(args, usage_rows=None):
     if not rows:
         print(f"{args.cli}: no profiles found", file=sys.stderr)
         return 1
-    add_usage(args.cli, add_signed_in(args.cli, rows), usage_rows)
+    model = getattr(args, "model", None)
+    include_fable = args.cli == "claude" and fable_model(claude_model() if model is None else model)
+    add_usage(args.cli, add_signed_in(args.cli, rows), usage_rows, include_fable=include_fable)
     _, body = columns(args.cli, rows, True)
     for index, (row, line) in enumerate(zip(rows, render([""] * len(body[0]), body)[1:]), start=1):
         print("\t".join([str(index), row["name"] or "", row["dir"], line]))
@@ -734,23 +719,40 @@ def command_resolve(args):
     return 0
 
 
-def command_pick(args, usage_rows=None):
+def pick(cli, usage_rows=None, model=None):
     """Highest urgency wins — the account whose window is closest to wasting the most
     capacity — with most-remaining as tiebreak; ties keep the first account in list order.
     An account with any window exhausted loses to every usable one. A signed-in account
     with no usage rows yet counts as full, but an account nothing can be read for is not
-    guessed at — with no judgeable candidate this fails instead of naming a default."""
-    rows = [row for row in add_signed_in(args.cli, rows_for(args.cli)) if row.get("signed_in")]
+    guessed at — with no judgeable candidate this fails instead of naming a default.
+    A Fable startup model excludes known Fable-exhausted accounts even if all are exhausted
+    or only one is signed in. Missing model-specific data is not proof of exhaustion."""
+    rows = [row for row in add_signed_in(cli, rows_for(cli)) if row.get("signed_in")]
     if not rows:
-        print(f"{args.cli}: no signed-in account to pick from", file=sys.stderr)
-        return 1
+        raise ResolveError(f"{cli}: no signed-in account to pick from", 1)
+    include_fable = cli == "claude" and fable_model(claude_model() if model is None else model)
+    if include_fable:
+        add_usage(cli, rows, usage_rows, include_fable=True)
+        rows = [row for row in rows if not row["fable_exhausted"]]
+        if not rows:
+            raise ResolveError("claude: Fable usage is exhausted on every signed-in account; "
+                               "wait for reset or choose another model with --model", 1)
     if len(rows) > 1:
-        add_usage(args.cli, rows, usage_rows)
+        if not include_fable:
+            add_usage(cli, rows, usage_rows)
         judged = [row for row in rows if row.get("remaining") is not None]
         if not judged:
-            print(f"{args.cli}: no usage data to pick an account from", file=sys.stderr)
-            return 1
+            raise ResolveError(f"{cli}: no usage data to pick an account from", 1)
         usable = [row for row in judged if row["remaining"] > 0] or judged
         rows = [max(usable, key=lambda row: (row["urgency"], row["remaining"]))]
-    emit_row(rows[0], args.json)
+    return rows[0]
+
+
+def command_pick(args, usage_rows=None):
+    try:
+        row = pick(args.cli, usage_rows, getattr(args, "model", None))
+    except ResolveError as error:
+        print(str(error), file=sys.stderr)
+        return error.code
+    emit_row(row, args.json)
     return 0

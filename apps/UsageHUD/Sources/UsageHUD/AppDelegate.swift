@@ -2,10 +2,7 @@ import AppKit
 import CoreGraphics
 import SwiftUI
 
-/// Expanded-panel height ceiling for a given screen: the panel has NO scrolling, so rather than a
-/// fixed constant that clips when more profile groups appear, content may grow to the screen's
-/// visible height minus a margin. The floor keeps a sane panel on tiny screens (content past the
-/// ceiling clips, as before).
+/// The expanded panel grows within the screen's visible height. Longer account lists scroll.
 func hudPanelHeight(screenHeight: CGFloat) -> CGFloat { max(400, screenHeight - 40) }
 
 /// AppKit panel frame — the max headroom the window can ever occupy; the VISIBLE expanded surface
@@ -14,9 +11,9 @@ func hudPanelHeight(screenHeight: CGFloat) -> CGFloat { max(400, screenHeight - 
 /// placement sites are the only writers) — a launch-time constant would bake in the wrong screen:
 /// `NSScreen.main` follows key-window focus, which an accessory app never owns, so the panel is
 /// placed on the built-in notched screen. Initial value is just a pre-first-placement default.
-var hudPanelSize = NSSize(width: 684, height: hudPanelHeight(screenHeight: NSScreen.screens.first?.visibleFrame.height ?? 800))
+var hudPanelSize = NSSize(width: 624, height: hudPanelHeight(screenHeight: NSScreen.screens.first?.visibleFrame.height ?? 800))
 let fallbackNotchSize = NSSize(width: 224, height: 38)
-let expandedSurfaceWidth: CGFloat = 644
+let expandedSurfaceWidth: CGFloat = 584
 let notchHoverHorizontalInset: CGFloat = 8
 let notchHoverBottomInset: CGFloat = 5
 let notchHoverTopInset: CGFloat = 1
@@ -78,17 +75,6 @@ func topEdgeInclusiveRect(_ rect: NSRect) -> NSRect {
     )
 }
 
-func windowBoundsMatchDisplay(
-    _ windowBounds: CGRect,
-    displayBounds: CGRect,
-    tolerance: CGFloat = 1
-) -> Bool {
-    abs(windowBounds.minX - displayBounds.minX) <= tolerance
-        && abs(windowBounds.minY - displayBounds.minY) <= tolerance
-        && abs(windowBounds.maxX - displayBounds.maxX) <= tolerance
-        && abs(windowBounds.maxY - displayBounds.maxY) <= tolerance
-}
-
 private let hudLogFormatter: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter()
     f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -131,8 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // schedule time and no-ops if it changed, so an interrupted episode's stale continuation can't
     // count an attempt against — or otherwise disturb — a later one.
     private var wedgeGeneration = 0
-    private var globalMouseMonitor: Any?
-    private var localMouseMonitor: Any?
+    private var hoverTimer: Timer?
     private var clickThroughState: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -177,13 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showHideItem.target = self
         menu.addItem(showHideItem)
 
-        let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "")
+        let refreshItem = NSMenuItem(title: "Refresh usage from API", action: #selector(refreshNow), keyEquivalent: "")
         refreshItem.target = self
         menu.addItem(refreshItem)
-
-        let fetchItem = NSMenuItem(title: "Fetch usage from API", action: #selector(fetchFromAPI), keyEquivalent: "")
-        fetchItem.target = self
-        menu.addItem(fetchItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -196,10 +177,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleShowHide() {
-        if panel.isVisible {
+        if panel.isVisible && !model.isCollapsed {
+            model.openedFromMenu = false
             hidePanel(trigger: "menu")
         } else {
+            model.openedFromMenu = true
             showPanel(refresh: true, trigger: "menu")
+            expand()
+            NSApp.activate(ignoringOtherApps: true)
+            panel.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -232,10 +218,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func refreshNow() {
-        model.refresh()
-    }
-
-    @objc private func fetchFromAPI() {
         model.fetchFromAPI()
     }
 
@@ -256,7 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Panel
 
     private func buildPanel() {
-        panel = NSPanel(
+        panel = UsagePanel(
             contentRect: NSRect(origin: .zero, size: hudPanelSize),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
@@ -355,8 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The ONE place hover state and click-through are decided, from raw screen-coordinate mouse
-    /// location. The hosting view's activeAlways tracking area covers the full notch, and global plus
-    /// local monitors provide cross-app fallbacks; every source feeds this single state transition.
+    /// location. The tracking area and cursor timer feed the same state transition.
     private func handleMouseLocationChanged() {
         guard panel.isVisible else { return }
         let isCollapsed = model.isCollapsed
@@ -376,7 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pendingCollapse?.cancel()
             pendingCollapse = nil
         } else if pendingCollapse == nil {
-            dismissFullscreenMenuBarIfNeeded()
             scheduleCollapse()
         }
     }
@@ -395,10 +375,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleCollapse() {
+        guard !model.openedFromMenu else { return }
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingCollapse = nil
-            guard !self.expandedHoverRectInScreen().contains(NSEvent.mouseLocation) else { return }
+            guard !self.model.openedFromMenu,
+                  !self.expandedHoverRectInScreen().contains(NSEvent.mouseLocation) else { return }
             self.collapse()
         }
         pendingCollapse = item
@@ -422,62 +404,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.isCollapsed = true
         hostingView.updateTrackingAreas()
         handleMouseLocationChanged()
-        dismissFullscreenMenuBarIfNeeded()
     }
 
     // MARK: Mouse monitoring
 
-    // The activeAlways tracking area mirrors Notchi's complete-notch path. A global monitor remains
-    // as a cross-app fallback for transitions where another process owns the current mouse event.
+    // Sampling cursor position needs no cross-app event monitor or input permission.
     private func startMouseMonitoring() {
-        guard globalMouseMonitor == nil else { return }
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+        guard hoverTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.handleMouseLocationChanged()
         }
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            self?.handleMouseLocationChanged()
-            return event
-        }
+        RunLoop.main.add(timer, forMode: .common)
+        hoverTimer = timer
     }
 
     private func stopMouseMonitoring() {
-        if let monitor = globalMouseMonitor { NSEvent.removeMonitor(monitor); globalMouseMonitor = nil }
-        if let monitor = localMouseMonitor { NSEvent.removeMonitor(monitor); localMouseMonitor = nil }
+        hoverTimer?.invalidate()
+        hoverTimer = nil
     }
 
     private func setClickThrough(_ ignore: Bool) {
         guard clickThroughState != ignore else { return }
         clickThroughState = ignore
         panel.ignoresMouseEvents = ignore
-    }
-
-    private func dismissFullscreenMenuBarIfNeeded() {
-        let screen = notchScreen()
-        guard NSMenu.menuBarVisible(), frontmostAppHasFullscreenWindow(on: screen) else { return }
-        NSMenu.setMenuBarVisible(false)
-    }
-
-    private func frontmostAppHasFullscreenWindow(on screen: NSScreen) -> Bool {
-        guard let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
-              let screenNumber = screen.deviceDescription[
-                  NSDeviceDescriptionKey("NSScreenNumber")
-              ] as? NSNumber else { return false }
-
-        let displayBounds = CGDisplayBounds(CGDirectDisplayID(screenNumber.uint32Value))
-        guard let windows = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: AnyObject]] else { return false }
-
-        return windows.contains { info in
-            guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == frontmostPID,
-                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-                  let boundsDictionary = info[kCGWindowBounds as String] as? [String: Any],
-                  let bounds = CGRect(
-                      dictionaryRepresentation: boundsDictionary as CFDictionary
-                  ) else { return false }
-            return windowBoundsMatchDisplay(bounds, displayBounds: displayBounds)
-        }
     }
 
     // MARK: Post-show WindowServer wedge self-heal
@@ -574,6 +523,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        showHideItem.title = panel.isVisible ? "Hide HUD" : "Show HUD"
+        showHideItem.title = panel.isVisible && !model.isCollapsed ? "Hide usage" : "Show usage"
     }
+}
+
+private final class UsagePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }

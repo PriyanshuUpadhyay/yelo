@@ -1,127 +1,226 @@
 # jello
 
-One CLI for the multi-account profiles of `claude`, `codex`, and `prime-agent`.
+Claude and Codex account profiles, with a local usage HUD for macOS.
 
-Each of those tools keeps one account per home directory — `~/.claude/.profiles/NAME`,
-`~/.codex-NAME`, `~/.prime/agent-NAME`. jello is the one place that knows how to find
-them, name them, pick between them, and launch into the right one. There is deliberately
-no default profile: an unmatched or ambiguous name is an error, because silently landing
-on the wrong account spends the wrong subscription.
-
-## Command groups
-
-| group | what it does |
-|---|---|
-| `jello profile` | `list`, `menu`, `resolve`, `pick`, `sessions`, `create` across the three CLIs |
-| `jello resume` | keeps the session-to-profile map a Claude Code hook writes, so a replayed `--resume` lands on the account that started it |
-| `jello shell-init` | prints the zsh wrappers for `claude`, `cc`, `codex`, and `prime-agent` |
-| `jello setup` | writes the shell cache, the Claude hook group, and the profile root, idempotently |
-| `jello doctor` | reports every setup step and HUD target as `ok`, `missing`, or `owned-by-dotfiles` |
-| `jello usage` | `show [--json]`, `fetch`, `doctor` — the account usage meters the HUD reads |
-| `jello hud` | `install`, `start`, `stop` — builds the Usage HUD app and runs it as a LaunchAgent |
+Use `claude` or `codex` normally. New sessions automatically select an account from
+its available usage. Add `--profile` to choose from a menu, or `--profile NAME` to
+select an account directly. Setup installs the selector separately from Jello.
 
 ## Install
 
+Requirements: Python 3.11 or newer, `uv`, and the Claude or Codex CLI you use.
+UsageHUD also requires macOS 14 or newer and Swift 5.9 or newer.
+
+From a clone of this repository:
+
 ```sh
-uv tool install --editable ~/jello
+uv tool install --editable .
+uv tool update-shell
+jello setup
 ```
 
-Then add one line to `~/.zshrc`:
+Open a new terminal after setup to load the profile integration. Setup supports zsh
+and adds its source line to `.zshrc`. Keep Python 3.11 or newer on PATH as `python3`.
+Keep the checkout in place: the editable install and HUD source build use it.
+Installing a wheel is not supported for the HUD.
+
+## Add accounts
 
 ```sh
-command -v jello >/dev/null && eval "$(jello shell-init zsh)"
+jello profile create --cli claude work
+claude --profile work auth login
+claude --profile work
+
+jello profile create --cli codex personal
+codex --profile personal login
+codex --profile personal
 ```
 
-`jello setup` writes the rest — the shell-init cache under `~/.cache/jello`, the
-`jello resume map-session` hook group in `~/.claude/settings.json`, and
-`~/.claude/.profiles`. It never edits `~/.zshrc`, never overwrites a target that another
-package owns, and a second run changes nothing. `jello doctor` re-derives every verdict
-from the filesystem and exits 0 when no step is missing.
+Add `--yes` to `profile create` in a non-interactive terminal. Claude also accepts
+`--email you@example.com` to label an account.
 
-## Usage meters
-
-`jello usage show` prints one row per account and window — 5h, 7d, and the Fable weekly —
-read from the cache files each account already keeps: the statusline caches
-(`.usage-cache*.json`), the API caches (`.usage-api-cache*.json`), and the Codex rollout
-files. It reads local files only: never the network, never the Keychain. `--json` prints
-the row array the HUD app decodes.
-
-`jello usage fetch` is the only writer of the API cache family. It reads each Claude
-profile's OAuth token from the Keychain, asks the usage API, and rewrites
-`.usage-api-cache.json`, `.usage-api-cache-fable.json`, and the Codex
-`.usage-hud-api-cache.json` — one outcome line per profile, and no token in any output,
-log, or cache file.
-
-`jello usage doctor` audits the same ground read-only — row shapes, freshness, credential
-presence, job liveness, and a token-leak scan over the HUD logs and every cache file — and
-exits non-zero on any finding.
-
-## The HUD app
-
-The menu-bar app lives in this repository under `apps/UsageHUD`, a Swift package. It reads
-its rows by running `jello usage show --json` and refreshes them with `jello usage fetch`.
-launchd hands a job no PATH, so the LaunchAgent carries the absolute path of the launcher
-in `JELLO_BIN`; `~/.local/bin/jello` is the fallback for a hand-started run.
+Existing accounts are discovered under `~/.claude/.profiles/NAME`, `~/.codex`, and
+`~/.codex-NAME`. Run `jello setup launchers` to create or update their commands.
+A base Codex account can have a name in `~/.codex/profile-label`.
 
 ```sh
-jello hud install    # swift build -c release, ~/Applications/UsageHUD.app, the LaunchAgent
-jello hud start      # bootstrap it into gui/<uid>
-jello hud stop       # boot it out
+jello profile list --cli claude
+jello profile list --cli codex --usage
+jello profile resolve --cli claude work
+jello profile pick --cli codex
+jello profile sessions --cli codex --all
+jello doctor
 ```
 
-`install` writes files and nothing else — it never calls `launchctl`, so starting the job
-stays a separate, explicit action. A second `install` reports `plist unchanged`. The label,
-the bundle identifier, and the ad-hoc signing identifier are all
-`io.github.priyanshuupadhyay.jello-hud`, and the job logs to
-`~/Library/Logs/jello-hud.out.log` and `jello-hud.err.log`.
-
-### Dogfooding it beside the dotfiles HUD
-
-The predecessor still ships from `~/dotfiles` under the label `work.example.usage-hud`. Both
-can run at once — different labels, different bundles, different log files — so install the
-jello one, start it, and compare the two windows before deciding:
+## Select an account
 
 ```sh
-jello hud install && jello hud start
-jello doctor          # usage and hud read owned-by-dotfiles until the cutover
+claude                         # Automatically select an account
+codex                          # Automatically select an account
+claude --profile               # Open the account menu
+codex --profile                # Open the account menu
+claude --profile work          # Select a named account
+codex --profile personal
+claude profile list            # List accounts and usage
+codex profile list
+codex --profile personal resume # Resume within this account
 ```
 
-### The cutover
+Automatic selection prefers signed-in accounts with usable capacity that will reset
+soon. An explicitly inherited account stays selected. Commands that manage credentials
+or sessions ask for an account when none is supplied; they do not automatically switch
+accounts. Menus require a terminal. An unknown or ambiguous name is an error, with no
+fallback to another account.
 
-When the jello HUD has earned it, retire the dotfiles one, in this order:
+The selection score is `fraction of quota remaining / fraction of time remaining`.
+The time fraction has a 2% minimum. Each account uses its highest window score;
+ties prefer more remaining capacity. Accounts with usable capacity take priority
+over exhausted accounts. The normal windows are five hours and seven days.
+
+For a Fable startup model, Claude also includes the Fable weekly window and excludes
+accounts with known exhausted Fable usage, even when only one account is signed in.
+If all are exhausted, it stops instead of starting Claude. The startup model comes
+from `--model`, environment variables, and local user/project settings, including
+`--settings` overrides. Explicit account selection still wins. Changing models
+inside a running Claude session does not select another account.
+
+Selection reads cached usage; it does not fetch from the network. Missing Fable
+data is not treated as proof of exhaustion. Use the HUD's Refresh button to update
+the samples before selecting from them.
+
+In the shell integration, Codex's `--profile NAME` selects an **account**. Use
+`codex --profile personal -p deep-review` to also select native configuration settings.
+`command codex --profile deep-review` bypasses the account wrapper entirely.
+The optional named shortcuts, such as `claude-work` and `codex-personal`, still work.
+
+`~/.config/jello/shell.sh` and `profiles.pyz` contain the installed integration.
+Profile selection, menus, and session launches keep working after `uv tool uninstall
+jello`, provided Python and the vendor CLIs remain installed. The archive contains its
+own copy of the selector code; it does not import the removed package or checkout.
+Creating new accounts through `claude profile create` or `codex profile create` still
+requires Jello. Existing accounts are discovered each time, without regenerating a list.
+
+Run `jello setup` to update an older integration. It backs up a known generated shell
+file and preserves `_codex_host_guard`. To load it in the current terminal:
 
 ```sh
-launchctl bootout gui/$(id -u)/work.example.usage-hud
-# in ~/dotfiles: git rm apps/usage-hud, home/.local/bin/usage-hud-*,
-#                       home/Library/LaunchAgents/work.example.usage-hud.plist
-stow -R home          # restow, dropping the retired links
+source "$HOME/.config/jello/shell.sh"
 ```
 
-`jello doctor` then reports `usage ok` and `hud ok`. Nothing else moves: the cache files,
-`~/.local/state/usage-hud/history.json`, and the statusline writer in
-`~/.claude/statusline-command.sh` stay exactly where they are.
+Custom shell files and symlinks are preserved. If `.zshrc` is a symlink and does not
+already source the integration, setup prints the line to add to its owner file.
 
-## Requirements
+Setup preserves foreign files at launcher paths and reports them. Repeating setup
+changes only missing or outdated integration files and launchers. Account credentials stay in their
+account homes or the macOS Keychain; they are not copied into this repository.
 
-Python 3.10 or newer. The standard library only: jello runs from a shell hook and from a
-wrapper on every prompt, so it must not pay for an import tree or break when an
-environment is half-installed.
-
-The `hud` group additionally needs Swift 5.9 or newer and macOS 14 or newer, because it
-compiles `apps/UsageHUD`. The `usage` group does not.
-
-## Runtime state is machine-local
-
-The account homes hold live credentials and machine state, and none of it belongs in this
-repository or any other: `auth.json` and `.claude.json` (tokens), the macOS Keychain items
-Claude Code writes, `~/.claude/.profiles/` itself, and the session map under
-`~/.claude/.profiles/.session-map/`. jello reads and writes those paths in place; it never
-copies them into the repository, and the tests never read them — every test that touches
-the filesystem runs against a temporary `HOME`.
-
-## Tests
+## UsageHUD
 
 ```sh
-uv run --with pytest pytest tests -q
+jello hud install
+jello hud start
+jello hud stop
+```
+
+The HUD opens at the top of the screen. Move the pointer over the notch to see your
+accounts, or choose **Show usage** from its menu-bar menu. The menu action keeps the
+panel open until you close it. Use **Refresh** or Command-R to run `jello usage fetch`
+and display the updated usage. Escape closes the panel. Accounts are grouped by provider with shared usage-window
+columns. Long account lists scroll while Refresh and Close stay visible.
+
+The HUD reads local usage files every two minutes and when you open it. These automatic
+reads do not use the network or read credentials. Clicking Refresh requests usage from
+the providers and can require network or Keychain access. It does not start an agent,
+control another app, or access your music library. A clock marks an older sample.
+A missing reading is shown as **No sample**, never as zero usage.
+
+Claude readings come from existing `.usage-cache*.json` and `.usage-api-cache*.json`
+files. Codex readings come from `.usage-hud-api-cache.json` and recent session logs.
+Jello does not install a Claude status-line writer. If no cache exists, use the
+Refresh button or the terminal command below to create one. The HUD reads usage
+amounts and reset times; it does not display session messages.
+
+`hud install` builds `~/Applications/UsageHUD.app` and writes a LaunchAgent. It does
+not start the app. The app label is `io.github.priyanshuupadhyay.jello-hud`.
+
+## Online refresh
+
+```sh
+jello usage show
+jello usage show --json
+jello usage fetch
+jello usage doctor
+```
+
+`usage show` reads local usage only. It does not read credentials or call the Keychain.
+
+`usage fetch` is the online action used by the HUD's Refresh button. It can also run
+directly in a terminal. It reads Claude credentials from the Keychain and requests
+usage from Anthropic. It uses the installed Codex app-server
+usage method for Codex accounts. These actions can need network or Keychain access;
+they run from the HUD only when you request Refresh. Expired Claude credentials
+return `auth-stale`.
+Sign in through the named launcher, then retry. Fetch does not start a Claude agent
+to renew credentials, run a prompt, or load its hooks and integrations.
+
+`usage doctor` also checks credentials and job status. Run it from a terminal when
+you need to diagnose a problem; the HUD does not run it.
+
+## Update and remove
+
+```sh
+jello update --check
+jello update
+jello update --hud
+```
+
+`update` fast-forwards the installed Git checkout from its configured upstream,
+reinstalls Jello with `uv`, then runs the updated setup. It stops if there are local
+changes, no upstream, or a merge is needed. It does not switch branches or discard
+work. `--check` checks local prerequisites; it does not fetch remote updates.
+`--hud` also rebuilds an installed HUD and restarts it if it was running. A failed
+build leaves the running app alone. Claude and Codex are updated with their own
+installers.
+
+After a manual source update, run `jello setup launchers`. For HUD changes, run
+`jello hud install`, then stop and start the HUD. An extracted source archive has
+no Git upstream. Install a newer archive with
+`uv tool install --reinstall --editable PATH`, or use a Git clone for `jello update`.
+
+To remove the HUD, stop it first, then remove `~/Applications/UsageHUD.app` and
+`~/Library/LaunchAgents/io.github.priyanshuupadhyay.jello-hud.plist`. To remove the CLI,
+run `uv tool uninstall jello`. Account homes and credentials remain in place.
+
+Jello manages Claude and Codex profiles and UsageHUD only. It does not install Herdr
+configuration, plugins, worker scripts, runtime skills, or Prime Agent extensions.
+Existing installations of those tools are independent of Jello.
+
+## Releases
+
+```sh
+jello release
+jello release --tag v0.3.0
+```
+
+Run this from a clean, committed checkout. The command creates a versioned source
+archive and SHA-256 file under `dist/`. It includes the Swift source and excludes
+untracked and ignored files. Existing release files are not overwritten. Nothing
+is published by this command. `--tag` also checks that the tag matches the project
+version and points at the current commit.
+
+The GitHub checks run Python tests on Linux and macOS and Swift tests on macOS.
+Pushing a `v*` tag runs these checks, prepares the archive, and creates a draft
+GitHub release with both files attached. Review the draft before publishing it.
+Set matching versions in `pyproject.toml` and `src/jello/__init__.py` before tagging.
+
+## Development
+
+```sh
+uv run --with pytest pytest -q
 swift test --package-path apps/UsageHUD
 ```
+
+Tests use temporary account homes and test credentials. The fetch tests use a local
+HTTP server. Swift tests cover usage parsing, history, layout, and the HUD's local
+read command. Source files under `docs/decisions` record earlier project decisions;
+the scope above describes the current product.

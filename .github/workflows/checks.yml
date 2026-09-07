@@ -1,0 +1,26 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: '3.11'
+      - run: uv tool install --editable .
+      - run: uv run --with pytest pytest -q
+      - if: runner.os == 'macOS'
+        run: swift test --package-path apps/UsageHUD

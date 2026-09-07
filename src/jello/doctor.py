@@ -1,28 +1,26 @@
-"""`jello doctor`: what is installed, judged from the filesystem alone.
-
-One row per setup step and then per HUD check, `step<TAB>state<TAB>detail`, where the
-state is `ok`, `missing`, or `owned-by-dotfiles`. Exit 1 only when a row is `missing`:
-`owned-by-dotfiles` is a correct answer during the cutover, not a fault.
-
-Doctor calls only the `check` half of each step, so it never creates, writes, or repairs
-anything (law L4). The verdict pattern is stow-drift-check.py's: ask the filesystem where
-the target actually points, never a marker file or setup's own record of what it did. The
-`usage` and `hud` rows follow the same rule and ask launchd nothing: whether the job is up
-right now is a different question from what is installed.
-"""
+"""Report profile setup and HUD installation without changing files."""
 
 import json
 import os
 
 from . import hud, setup
 
+CHECKS = (*setup.STEPS, *hud.CHECKS)
+
 
 def rows(home):
-    return [(step.name, *step.check(home)) for step in (*setup.STEPS, *hud.CHECKS)]
+    return [(step.name, *step.check(home)) for step in CHECKS]
 
 
 def run(args):
-    report = rows(os.path.expanduser("~"))
+    from .cli import fail
+
+    try:
+        report = rows(os.path.expanduser("~"))
+    except setup.SetupError as error:
+        # A checkout that does not carry an asset a row compares against is a broken
+        # install: one error line naming the asset, never a traceback (F26).
+        return fail("doctor", str(error), error.path)
     if args.json:
         print(json.dumps(
             [{"step": name, "state": state, "detail": detail} for name, state, detail in report],

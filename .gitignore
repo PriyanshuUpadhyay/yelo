@@ -13,3 +13,6 @@ apps/UsageHUD/.build/
 
 # `uv run` writes this, and jello has no dependencies for it to pin.
 uv.lock
+
+# Local files from the former Herdr install; live scripts still link here.
+/assets

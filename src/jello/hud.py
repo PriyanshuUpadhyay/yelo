@@ -10,8 +10,7 @@ Three commands, one target each:
   stop     boot it out; already stopped is success.
 
 launchd hands the job no user PATH, so the plist carries the absolute path of the jello
-launcher in JELLO_BIN and the app reaches `jello usage show --json` and `jello usage fetch`
-through it.
+launcher in JELLO_BIN and the app reaches `jello usage show --json` through it.
 
 A target another package owns is never overwritten. Ownership is setup's rule and setup's
 code: a symlink whose realpath lands inside ~/dotfiles. `CHECKS` hands `jello doctor` the
@@ -122,7 +121,7 @@ def plist_document(home):
         "Label": LABEL,
         "ProgramArguments": [binary_path(home)],
         "RunAtLoad": True,
-        "KeepAlive": True,
+        "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": os.path.join(home, LOGS_RELATIVE, "jello-hud.out.log"),
         "StandardErrorPath": os.path.join(home, LOGS_RELATIVE, "jello-hud.err.log"),
         "EnvironmentVariables": {"JELLO_BIN": launcher_path()},

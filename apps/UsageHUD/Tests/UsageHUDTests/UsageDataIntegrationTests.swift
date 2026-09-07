@@ -52,8 +52,7 @@ final class UsageDataIntegrationTests: XCTestCase {
         XCTAssertEqual(session.source, "api")
     }
 
-    /// Fetchability is a per-row fact from the data feed. The unified fetch script reports both
-    /// Claude and Codex, including accounts that have no cached data yet.
+    /// The snapshot reports which providers can be refreshed on request.
     func testRowsCarryFetchabilityPerProvider() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let claude = home.appendingPathComponent(".claude/.profiles/pri")
@@ -63,7 +62,6 @@ final class UsageDataIntegrationTests: XCTestCase {
         try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: emptyClaude, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: codex, withIntermediateDirectories: true)
-        try signIn(codexHome: home.appendingPathComponent(".codex"))
         defer { try? FileManager.default.removeItem(at: home) }
 
         let now = Int(Date().timeIntervalSince1970)
@@ -93,7 +91,6 @@ final class UsageDataIntegrationTests: XCTestCase {
         let codexHome = home.appendingPathComponent(".codex")
         let sessions = codexHome.appendingPathComponent("sessions/2026/08/03")
         try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
-        try signIn(codexHome: codexHome)
         defer { try? FileManager.default.removeItem(at: home) }
 
         let now = Int(Date().timeIntervalSince1970)
@@ -119,8 +116,10 @@ final class UsageDataIntegrationTests: XCTestCase {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let claude = home.appendingPathComponent(".claude/.profiles/pri")
         try FileManager.default.createDirectory(at: claude, withIntermediateDirectories: true)
-        // A signed-in codex home with no cache and no rollout: the row the fetch fills in.
-        try signIn(codexHome: home.appendingPathComponent(".codex"))
+        // An account directory with no cache or rollout produces a missing-data row.
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".codex"), withIntermediateDirectories: true
+        )
         defer { try? FileManager.default.removeItem(at: home) }
 
         let rows = try JSONDecoder().decode([MeterRow].self, from: try runUsageData(home: home))
@@ -130,29 +129,19 @@ final class UsageDataIntegrationTests: XCTestCase {
         XCTAssertEqual(codex.canFetch, true)
     }
 
-    /// A codex home is only measured when it holds credentials — the provider reports one
-    /// `logged_out` row otherwise. Real homes always carry this file; fixtures must too.
-    private func signIn(codexHome: URL) throws {
-        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
-        let auth = #"{"tokens":{"access_token":"fixture","refresh_token":"fixture"}}"#
-        try Data(auth.utf8).write(to: codexHome.appendingPathComponent("auth.json"))
-    }
-
     private func runUsageData(home: URL) throws -> Data {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
         environment["USAGE_HUD_STALE_AFTER"] = "9999999999"
         environment["CODEX_BIN"] = "/usr/bin/true"
-        // The provider asks the Keychain whether each Claude profile is signed in, and a
-        // fixture HOME has no Keychain item: without this the whole profile collapses to
-        // one `logged_out` row. /usr/bin/true is the same pin the Python tests use.
-        environment["AGENT_PROFILES_SECURITY_BIN"] = "/usr/bin/true"
-
-        // The provider is whatever the app itself would run for a snapshot, resolved from
-        // this same environment — so these cases exercise the shipped contract instead of
-        // a path only the tests know. A machine without the provider installed skips
-        // rather than fails: the contract under test is the app's, not the installation's.
-        let command = processArguments(kind: .snapshot, environment: environment)
+        // Use this checkout's provider, even when the launcher has an older package installed.
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        environment["PYTHONPATH"] = repository.appendingPathComponent("src").path
+        environment.removeValue(forKey: "USAGE_HUD_SCRIPT")
+        let command = snapshotArguments(environment: environment)
         guard FileManager.default.isExecutableFile(atPath: command.executable) else {
             throw XCTSkip("no usage provider at \(command.executable)")
         }
@@ -163,7 +152,7 @@ final class UsageDataIntegrationTests: XCTestCase {
         process.environment = environment
         let stdout = Pipe()
         process.standardOutput = stdout
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
 
         try process.run()
         let data = stdout.fileHandleForReading.readDataToEndOfFile()

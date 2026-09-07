@@ -1,13 +1,17 @@
-"""`profile create` for the claude, codex, and Prime Agent account homes.
+"""`profile create` for the Claude and Codex account homes.
 
 Ported from the three zsh creators: `_cprofile_manage create` (.aliases:58-108),
-`_codexprofile_manage create` (.zshrc:138-184), and `_prime_profile_manage create`
-(.zshrc:357-392). Messages, exit codes, directory modes, and the copied and linked
+`_codexprofile_manage create` (.zshrc:138-184). Messages, exit codes, directory modes, and the copied and linked
 files are the shell's; only the order of the claude profile-root mkdir changed, so a
 refusal or a cancelled prompt now creates nothing at all.
 
 Every refusal is raised before the confirmation prompt, and the prompt runs before the
 first write, so a create either happens whole or leaves the tree as it was.
+
+The account's launcher is written last, so `claude profile create sid` leaves a `claude-sid`
+command behind and nobody has to remember `jello setup launchers` (jello.launchers). Its
+path is checked with the other refusals, before anything is made: the success line names
+that command, so an account cannot be created into one somebody else owns.
 """
 
 import os
@@ -15,19 +19,17 @@ import shutil
 import sys
 
 from . import core
+from .. import launchers
 
 # The label the messages carry, which is the command the user typed, not the --cli value.
-LABELS = {"claude": "claude", "codex": "codex", "prime": "prime-agent"}
-DISPLAY = {"claude": "Claude", "codex": "Codex", "prime": "Prime Agent"}
+LABELS = {"claude": "claude", "codex": "codex"}
+DISPLAY = {"claude": "Claude", "codex": "Codex"}
 USAGE = {
-    "claude": "usage: claude profile create NAME [--email ADDR] [--yes]",
-    "codex": "usage: codex profile create NAME [--yes]",
-    "prime": "usage: prime-agent profile create NAME [--yes]",
+    "claude": "usage: jello profile create --cli claude NAME [--email ADDR] [--yes]",
+    "codex": "usage: jello profile create --cli codex NAME [--yes]",
 }
-# Companions the codex creator links from the base home, and the ones prime links from
-# its base agent home. A missing source is skipped, never an error.
+# Companions shared with the base Codex home. Missing sources are skipped.
 CODEX_LINKS = ("hooks.json", "AGENTS.md")
-PRIME_LINKS = ("settings.json", "bin", "extensions", "skills", "harness")
 CONFIRM_YES = ("y", "Y", "yes", "YES", "Yes")
 
 
@@ -44,7 +46,7 @@ def profile_root(cli, home):
         return os.path.join(home, ".claude", ".profiles")
     if cli == "codex":
         return home
-    return os.path.join(home, ".prime")
+    raise ValueError(f"unsupported provider: {cli}")
 
 
 def profile_dir(cli, name, home):
@@ -53,7 +55,7 @@ def profile_dir(cli, name, home):
         return os.path.join(root, name)
     if cli == "codex":
         return os.path.join(root, core.CODEX_PREFIX + name)
-    return os.path.join(root, core.PRIME_PREFIX + name)
+    raise ValueError(f"unsupported provider: {cli}")
 
 
 def mkdir_700(path):
@@ -122,7 +124,7 @@ def write_claude(name, directory, home, email):
     if email:
         with open(os.path.join(directory, "email"), "w", encoding="utf-8") as handle:
             handle.write(email + "\n")
-    return f"Created profile '{name}'. Sign in with: claude --profile {name} auth login"
+    return f"Created profile '{name}'. Sign in with: claude-{name} auth login"
 
 
 def write_codex(name, directory, home):
@@ -138,26 +140,7 @@ def write_codex(name, directory, home):
         target = link_target(os.path.join(base, item))
         if target:
             os.symlink(target, os.path.join(directory, item))
-    return f"Created profile '{name}'. Sign in with: codex --profile {name} login"
-
-
-def write_prime(name, directory, home):
-    root = profile_root("prime", home)
-    base = os.path.join(root, core.PRIME_BASE)
-    mkdir_p_700(root)
-    mkdir_700(directory)
-    try:
-        write_600(os.path.join(directory, "auth.json"), "{}\n")
-        for item in PRIME_LINKS:
-            source = os.path.join(base, item)
-            if os.path.exists(source):
-                os.symlink(source, os.path.join(directory, item))
-    except OSError as error:
-        # A half-made home would resolve as a real account, so it is removed whole.
-        shutil.rmtree(directory, ignore_errors=True)
-        raise CreateError(f"prime-agent: could not create {directory}: {error}", 1) from None
-    return (f"Created profile '{name}'. Start it with 'prime-agent --profile {name}', "
-            "then run /login.")
+    return f"Created profile '{name}'. Sign in with: codex-{name} login"
 
 
 def create(cli, name, home=None, email=None, yes=False):
@@ -173,19 +156,33 @@ def create(cli, name, home=None, email=None, yes=False):
     if not core.valid_name(name):
         raise CreateError(f"{label}: invalid profile name: {name}", 2)
     root = profile_root(cli, home)
-    # Only the claude creator refuses a symlinked root today; codex writes beside $HOME
-    # and prime creates its own root, so neither has the check to port.
+    # Codex homes sit directly under HOME; only Claude has a shared profile root.
     if cli == "claude" and os.path.islink(root):
         raise CreateError(f"claude: profile root must not be a symlink: {root}", 1)
     directory = profile_dir(cli, name, home)
     check_free(cli, name, directory)
+    # A free directory name is not a free command either. The success line below names
+    # `<cli>-<name>`, so an account whose command already belongs to somebody else would be
+    # a promise nobody can keep -- and undoing it would mean deleting the home by hand.
+    taken = launchers.foreign(cli, name, home)
+    if taken is not None:
+        raise CreateError(
+            f"{label}: '{name}' would need a command somebody else owns: {taken}", 1)
     if not yes:
         confirm(cli, name, directory)
     if cli == "claude":
-        return write_claude(name, directory, home, email)
-    if cli == "codex":
-        return write_codex(name, directory, home)
-    return write_prime(name, directory, home)
+        message = write_claude(name, directory, home, email)
+    elif cli == "codex":
+        message = write_codex(name, directory, home)
+    # The home exists from here on, so a launcher that cannot be written is reported as
+    # exactly that rather than swallowed: `jello setup launchers` finishes the job.
+    try:
+        path = launchers.write_one(cli, name, directory, home)
+    except OSError as error:
+        raise CreateError(
+            f"{label}: created {directory}, but its launcher could not be written: "
+            f"{error}. Run `jello setup launchers` to finish.", 1) from None
+    return f"{message}\nWrote {path}." if path else message
 
 
 def command_create(args):
