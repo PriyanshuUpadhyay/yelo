@@ -51,6 +51,16 @@ struct APIRefreshTests {
         #expect(apiFetchSummary(output, exitCode: status).warning == warning)
     }
 
+    /// The footer count and the rows must name the same accounts, so the summary carries the
+    /// per-account word keyed by the label the rows already use.
+    @Test
+    func reportsPerAccountStatuses() {
+        let result = apiFetchSummary("cl·a: ok\ncx·b: fetch-failed\n", exitCode: 0)
+        #expect(result.statuses == ["cl·a": "ok", "cx·b": "fetch-failed"])
+        #expect(result.warning)
+        #expect(result.message == "Updated 1 of 2 accounts.")
+    }
+
     @Test
     func missingExecutableReportsFailure() {
         #expect(runAPIFetch(executable: "/missing/jello").warning)

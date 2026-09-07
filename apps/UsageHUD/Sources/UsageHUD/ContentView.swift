@@ -9,6 +9,23 @@ let claudeColor = Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
 let codexColor = Color(red: 0x2D / 255, green: 0x7F / 255, blue: 0xF9 / 255)
 let microFade = 0.14
 
+// Bars run base → light so the fill reads as lit rather than painted.
+let claudeLightColor = Color(red: 0xF2 / 255, green: 0xA2 / 255, blue: 0x7E / 255)
+let codexLightColor = Color(red: 0x6F / 255, green: 0xB2 / 255, blue: 0xFF / 255)
+let warnLightColor = Color(red: 0xFF / 255, green: 0xC1 / 255, blue: 0x5E / 255)
+let dangerLightColor = Color(red: 0xFF / 255, green: 0x7B / 255, blue: 0x7F / 255)
+let calmColor = Color(red: 0x5A / 255, green: 0xD8 / 255, blue: 0xA4 / 255)
+
+// The panel is always dark, so the surface is stated outright instead of inherited.
+let surfaceTopColor = Color(red: 0x11 / 255, green: 0x11 / 255, blue: 0x16 / 255)
+let surfaceBottomColor = Color(red: 0x09 / 255, green: 0x09 / 255, blue: 0x0B / 255)
+let cardInsetColor = Color.white.opacity(0.04)
+let hairlineColor = Color.white.opacity(0.07)
+let edgeStrokeColor = Color.white.opacity(0.06)
+let textPrimary = Color.white.opacity(0.92)
+let textSecondary = Color.white.opacity(0.55)
+let textTertiary = Color.white.opacity(0.35)
+
 enum PresentationSeverity {
     case calm, warn, danger
 
@@ -96,13 +113,20 @@ struct ContentView: View {
         )
     }
 
+    /// Opening is the eye-catching move and can overshoot a little; closing must feel like the
+    /// panel simply left, so it is critically damped.
     private var geometryAnimation: Animation? {
         guard !reduceMotion else { return nil }
-        return .spring(response: 0.32, dampingFraction: 1)
+        return isCollapsed
+            ? .spring(response: 0.3, dampingFraction: 1)
+            : .spring(response: 0.36, dampingFraction: 0.86)
     }
 
-    private var contentAnimation: Animation {
-        reduceMotion ? .easeOut(duration: microFade) : .easeOut(duration: 0.2)
+    private var backdrop: NotchBackdropShape {
+        NotchBackdropShape(
+            topShoulder: isCollapsed ? 6 : 22,
+            bottomRadius: isCollapsed ? 14 : 28
+        )
     }
 
     var body: some View {
@@ -112,8 +136,13 @@ struct ContentView: View {
 
             if !isCollapsed {
                 ExpandedContent(model: model, reduceMotion: reduceMotion)
-                    .transition(reduceMotion ? .identity : .opacity)
-                    .animation(contentAnimation, value: isCollapsed)
+                    .transition(reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                    .animation(reduceMotion
+                               ? .easeOut(duration: microFade)
+                               : .spring(response: 0.34, dampingFraction: 0.9),
+                               value: isCollapsed)
             }
         }
         .frame(width: currentSize.width, height: currentSize.height, alignment: .top)
@@ -121,20 +150,17 @@ struct ContentView: View {
             if reduceTransparency || contrast == .increased || isCollapsed {
                 Color.black
             } else {
-                LinearGradient(colors: [Color(white: 0.095), Color(white: 0.055)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                LinearGradient(colors: [surfaceTopColor, surfaceBottomColor],
+                               startPoint: .top, endPoint: .bottom)
             }
         }
-        .clipShape(
-            NotchBackdropShape(
-                topShoulder: isCollapsed ? 6 : 18,
-                bottomRadius: isCollapsed ? 14 : 24
-            )
-        )
+        .clipShape(backdrop)
+        // Collapsed, the panel must disappear into the bezel — an edge stroke there would draw it.
+        .overlay { if !isCollapsed { backdrop.stroke(edgeStrokeColor, lineWidth: 1) } }
         .shadow(
-            color: isCollapsed ? .clear : .black.opacity(0.65),
-            radius: isCollapsed ? 0 : 12,
-            y: isCollapsed ? 0 : 6
+            color: isCollapsed ? .clear : .black.opacity(0.5),
+            radius: isCollapsed ? 0 : 22,
+            y: isCollapsed ? 0 : 10
         )
         .animation(geometryAnimation, value: isCollapsed)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

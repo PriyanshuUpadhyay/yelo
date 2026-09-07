@@ -225,26 +225,39 @@ func oldestDataDate(in rows: [MeterRow]) -> Date? {
 struct APIFetchResult {
     let message: String
     let warning: Bool
+    /// Per-account outcome word, keyed by the same `cl·NAME` / `cx·NAME` labels the rows carry.
+    var statuses: [String: String] = [:]
 }
 
 /// The CLI exits zero when at least one account succeeds. Check every status before claiming success.
+/// Each line is `label: status`; the label can hold a `: ` of its own, so the LAST one splits.
 func apiFetchSummary(_ output: String, exitCode: Int32) -> APIFetchResult {
-    let lines = output.split(separator: "\n")
-    let statuses = lines.compactMap { $0.components(separatedBy: ": ").last }
-    let updated = statuses.filter { $0 == "ok" }.count
-    guard !statuses.isEmpty, exitCode == 0 || exitCode == 1 else {
+    let parsed: [(String, String)] = output.split(separator: "\n").compactMap { line in
+        guard let separator = line.range(of: ": ", options: .backwards) else { return nil }
+        return (String(line[..<separator.lowerBound]), String(line[separator.upperBound...]))
+    }
+    let statuses = Dictionary(parsed, uniquingKeysWith: { _, last in last })
+    let words = parsed.map(\.1)
+    let updated = words.filter { $0 == "ok" }.count
+    guard !words.isEmpty, exitCode == 0 || exitCode == 1 else {
         return APIFetchResult(message: "Could not fetch usage. Try Refresh again.", warning: true)
     }
-    if exitCode == 0 && updated == statuses.count {
-        return APIFetchResult(message: "Updated \(updated) \(updated == 1 ? "account" : "accounts").", warning: false)
+    if exitCode == 0 && updated == words.count {
+        return APIFetchResult(message: "Updated \(updated) \(updated == 1 ? "account" : "accounts").",
+                              warning: false, statuses: statuses)
     }
-    if statuses.contains("auth-stale") {
-        return APIFetchResult(message: "Some accounts need sign-in. Use their CLI launchers.", warning: true)
+    if words.contains("auth-stale") {
+        return APIFetchResult(
+            message: "Updated \(updated) of \(words.count) accounts. Sign in to marked accounts with their launchers.",
+            warning: true, statuses: statuses)
     }
-    if statuses.contains("fable-write-failed") {
-        return APIFetchResult(message: "Usage updated, but a Fable sample could not be saved.", warning: true)
+    if words.allSatisfy({ $0 == "ok" || $0 == "fable-write-failed" }) {
+        return APIFetchResult(message: "Usage updated, but a Fable sample could not be saved.",
+                              warning: true, statuses: statuses)
     }
-    return APIFetchResult(message: "Updated \(updated) of \(statuses.count) accounts. Try Refresh again.", warning: true)
+    // No "Try Refresh again": the person just pressed Refresh, and the rows name what failed.
+    return APIFetchResult(message: "Updated \(updated) of \(words.count) accounts.",
+                          warning: true, statuses: statuses)
 }
 
 func runAPIFetch(executable: String, timeout: TimeInterval = 120) -> APIFetchResult {

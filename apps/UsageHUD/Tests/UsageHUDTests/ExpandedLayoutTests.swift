@@ -81,6 +81,17 @@ final class RowStalenessTests: XCTestCase {
         XCTAssertEqual(freshnessDetail(missing), "No local sample for this window · click Refresh to fetch current usage")
     }
 
+    /// A provider the CLI cannot fetch is never told to press Refresh: the button would not move it.
+    func testUnfetchableRowNamesTheManualUpdatePath() {
+        let stale = MeterRow(label: "cx", provider: "codex", window: "7d", pct: 40, reset: "3d",
+                             state: "stale", reason: nil, asOf: now - 1200, seenAt: now - 1200,
+                             active: nil, source: "api", canFetch: false)
+        XCTAssertEqual(
+            freshnessDetail(stale, now: Date(timeIntervalSince1970: now)),
+            "API last confirmed 20m ago · use this account in the CLI to update it"
+        )
+    }
+
     func testExpiredWindowMarksItsLastZeroAsStale() {
         let expired = MeterRow(label: "cl·endu", provider: "claude", window: "5h", pct: 0, reset: "now",
                                state: "stale", reason: nil, asOf: now, seenAt: now,
@@ -89,6 +100,38 @@ final class RowStalenessTests: XCTestCase {
             freshnessDetail(expired, now: Date(timeIntervalSince1970: now)),
             "Window reset · waiting for a current API sample"
         )
+    }
+}
+
+/// The account subtitle answers "can I trust this number?": a failed fetch outranks the age.
+final class AccountSubtitleTests: XCTestCase {
+    private let now = Date().timeIntervalSince1970
+
+    func testFreshActiveAccountReportsAgeAndLastUsed() {
+        let rows = [MeterRow(label: "cl·pri", provider: "claude", window: "5h", pct: 10, reset: "1h",
+                             state: "ok", reason: nil, asOf: now, seenAt: now,
+                             active: true, source: "api", canFetch: true)]
+        let subtitle = accountSubtitle(rows, fetchStatus: "ok", now: Date(timeIntervalSince1970: now))
+        XCTAssertEqual(subtitle.text, "just now · last used")
+        XCTAssertFalse(subtitle.warning)
+    }
+
+    func testFetchFailureLeadsAndKeepsTheLocalSampleAge() {
+        let rows = [MeterRow(label: "cx·work", provider: "codex", window: "7d", pct: 40, reset: "3d",
+                             state: "stale", reason: nil, asOf: now - 4 * 86_400, seenAt: now - 4 * 86_400,
+                             active: nil, source: "rollout", canFetch: false)]
+        let subtitle = accountSubtitle(rows, fetchStatus: "fetch-failed", now: Date(timeIntervalSince1970: now))
+        XCTAssertEqual(subtitle.text, "Fetch failed · 4d ago")
+        XCTAssertTrue(subtitle.warning)
+    }
+
+    func testAuthStaleWithoutAnyLocalSampleStandsAlone() {
+        let rows = [MeterRow(label: "cl·endu", provider: "claude", window: "5h", pct: nil, reset: nil,
+                             state: "missing", reason: nil, asOf: nil,
+                             active: false, source: "api", canFetch: true)]
+        let subtitle = accountSubtitle(rows, fetchStatus: "auth-stale", now: Date(timeIntervalSince1970: now))
+        XCTAssertEqual(subtitle.text, "Sign in needed")
+        XCTAssertTrue(subtitle.warning)
     }
 }
 
