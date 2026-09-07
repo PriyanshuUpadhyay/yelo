@@ -1,6 +1,6 @@
 [project]
 name = "jello"
-version = "0.3.0"
+version = "0.4.0"
 description = "Claude and Codex account profiles and a local usage HUD"
 readme = "README.md"
 authors = [

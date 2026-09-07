@@ -19,6 +19,9 @@ so its answer cannot depend on whether the job happens to be up.
 
 JELLO_HUD_LABEL and JELLO_HUD_PACKAGE relocate the label and the Swift package for tests
 and for the rehearsal; JELLO_DOTFILES_ROOT relocates the ownership root, as in setup.
+JELLO_HUD_BUNDLE names an already-built .app to copy instead of compiling, and JELLO_BIN
+names the launcher to record: a Homebrew install builds the app once and reaches jello
+through a stable wrapper, not through the versioned Cellar path sys.argv[0] would show.
 """
 
 import os
@@ -86,9 +89,14 @@ def dotfiles_owned(path):
 
 
 def launcher_path():
-    """The absolute `jello` launchd must run, because it inherits no PATH. `sys.argv[0]`
-    is the entry point uv installed when the command was typed; a module run (`python -m
-    jello.cli`) leaves a different basename there, so PATH answers instead."""
+    """The absolute `jello` launchd must run, because it inherits no PATH. JELLO_BIN wins:
+    a wrapper install knows its own stable path, where `sys.argv[0]` would name a versioned
+    one. Otherwise `sys.argv[0]` is the entry point uv installed when the command was typed;
+    a module run (`python -m jello.cli`) leaves a different basename there, so PATH answers
+    instead."""
+    explicit = os.environ.get("JELLO_BIN")
+    if explicit:
+        return explicit
     candidate = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
     if os.path.basename(candidate) == "jello":
         return candidate
@@ -205,18 +213,24 @@ def swap(final, staged):
         shutil.rmtree(retired, ignore_errors=True)
 
 
-def assemble_bundle(home, package):
-    """Assemble the bundle in a sibling directory, sign it there, then swap it in. Nothing
-    half-built is ever reachable at ~/Applications/UsageHUD.app."""
-    source = os.path.join(package, ".build", "release", APP_NAME)
-    if not os.path.isfile(source):
-        raise HudError("swift build produced no binary", source)
+def stage_bundle(home):
+    """(final, staged): an empty sibling of ~/Applications/UsageHUD.app to build inside, so
+    nothing half-built is ever reachable at the final path."""
     final = bundle_path(home)
     parent = os.path.dirname(final)
     os.makedirs(parent, exist_ok=True)
     staged = tempfile.mkdtemp(dir=parent, prefix=f".{APP_NAME}.app.new.")
+    os.chmod(staged, 0o755)
+    return final, staged
+
+
+def assemble_bundle(home, package):
+    """Assemble the bundle in a sibling directory, sign it there, then swap it in."""
+    source = os.path.join(package, ".build", "release", APP_NAME)
+    if not os.path.isfile(source):
+        raise HudError("swift build produced no binary", source)
+    final, staged = stage_bundle(home)
     try:
-        os.chmod(staged, 0o755)
         contents = os.path.join(staged, "Contents")
         os.makedirs(os.path.join(contents, "MacOS"))
         executable = os.path.join(contents, "MacOS", APP_NAME)
@@ -224,6 +238,22 @@ def assemble_bundle(home, package):
         os.chmod(executable, 0o755)
         with open(os.path.join(contents, "Info.plist"), "wb") as handle:
             plistlib.dump(info_plist_document(), handle)
+        sign(staged)
+        swap(final, staged)
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+    return final
+
+
+def copy_bundle(home, prebuilt):
+    """Install an .app somebody else already built -- Homebrew compiles it once, at
+    `brew install` time -- through the same stage, sign, swap path as a fresh build."""
+    if not os.path.isfile(os.path.join(prebuilt, "Contents", "MacOS", APP_NAME)):
+        raise HudError("prebuilt bundle not found", prebuilt)
+    final, staged = stage_bundle(home)
+    try:
+        shutil.copytree(prebuilt, staged, symlinks=True, dirs_exist_ok=True)
         sign(staged)
         swap(final, staged)
     except BaseException:
@@ -276,10 +306,15 @@ def install(args):
         if dotfiles_owned(bundle):
             raise HudError("bundle is owned by dotfiles", bundle)
         document = plist_document(home)
-        package = package_path()
-        build(package)
-        assemble_bundle(home, package)
-        print("bundle rebuilt")
+        prebuilt = os.environ.get("JELLO_HUD_BUNDLE")
+        if prebuilt:
+            copy_bundle(home, prebuilt)
+            print(f"bundle installed from {prebuilt}")
+        else:
+            package = package_path()
+            build(package)
+            assemble_bundle(home, package)
+            print("bundle rebuilt")
         print(f"plist {write_plist(home, document)}")
     except HudError as error:
         return fail("hud install", str(error), error.path)

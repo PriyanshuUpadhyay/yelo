@@ -9,7 +9,20 @@ select an account directly. Setup installs the selector separately from Jello.
 ## Install
 
 Requirements: Python 3.11 or newer, `uv`, and the Claude or Codex CLI you use.
-UsageHUD also requires macOS 14 or newer and Swift 5.9 or newer.
+UsageHUD also requires macOS 14 or newer and Swift 5.9 or newer. A Homebrew install
+also requires the Xcode Command Line Tools.
+
+With Homebrew:
+
+```sh
+brew install priyanshuupadhyay/tap/jello
+jello setup
+jello hud install && jello hud start
+```
+
+Homebrew builds the CLI and the HUD app on your Mac during install; `jello hud install`
+copies the app into `~/Applications`. Update with `brew upgrade jello`. `jello update` is
+for Git checkouts only.
 
 From a clone of this repository:
 
@@ -199,7 +212,7 @@ Existing installations of those tools are independent of Jello.
 
 ```sh
 jello release
-jello release --tag v0.3.0
+jello release --tag v0.4.0
 ```
 
 Run this from a clean, committed checkout. The command creates a versioned source

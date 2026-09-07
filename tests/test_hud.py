@@ -303,3 +303,47 @@ def test_install_refuses_a_package_it_cannot_find(hud):
     assert result.returncode == 1
     assert result.stderr == f"jello: hud install: swift package not found ({missing})\n"
     assert hud.calls(hud.swift_log) == []
+
+
+def test_install_copies_prebuilt_bundle(hud, tmp_path):
+    """The Homebrew path: the .app is already compiled, so install copies it and never
+    reaches `swift build`."""
+    prebuilt = tmp_path / "prebuilt" / "UsageHUD.app"
+    (prebuilt / "Contents" / "MacOS").mkdir(parents=True)
+    executable(prebuilt / "Contents" / "MacOS" / "UsageHUD", "prebuilt UsageHUD binary\n")
+    (prebuilt / "Contents" / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleName": "UsageHUD"}))
+
+    result = hud.run("hud", "install", JELLO_HUD_BUNDLE=str(prebuilt))
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        f"bundle installed from {prebuilt}", "plist written", "next: jello hud start"
+    ]
+    assert hud.calls(hud.swift_log) == [], "a prebuilt bundle is never compiled again"
+    assert hud.binary.read_text() == "prebuilt UsageHUD binary\n"
+    assert plistlib.loads(hud.info.read_bytes()) == {"CFBundleName": "UsageHUD"}
+
+
+def test_install_refuses_missing_prebuilt_bundle(hud, tmp_path):
+    """A JELLO_HUD_BUNDLE with no executable inside is the one error line, naming it."""
+    empty = tmp_path / "empty.app"
+    empty.mkdir()
+
+    result = hud.run("hud", "install", JELLO_HUD_BUNDLE=str(empty))
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == f"jello: hud install: prebuilt bundle not found ({empty})\n"
+    assert hud.calls(hud.swift_log) == []
+    assert not hud.bundle.exists()
+
+
+def test_plist_records_explicit_launcher(hud):
+    """A wrapper install names its own stable path in JELLO_BIN; the plist takes it as
+    given, rather than resolving the launcher that happened to run."""
+    result = hud.run("hud", "install", JELLO_BIN="/opt/x/bin/jello")
+
+    assert result.returncode == 0, result.stderr
+    document = plistlib.loads(hud.plist.read_bytes())
+    assert document["EnvironmentVariables"]["JELLO_BIN"] == "/opt/x/bin/jello"

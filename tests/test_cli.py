@@ -221,7 +221,7 @@ def test_version(jello):
     """C01: the version R1 names."""
     result = jello("--version")
     assert result.returncode == 0
-    assert result.stdout.strip() == "jello 0.3.0"
+    assert result.stdout.strip() == "jello 0.4.0"
 
 
 # --- the trailing-argv hook (board A3, chair ruling cli-extras-hook) -----------------------

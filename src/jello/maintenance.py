@@ -19,7 +19,8 @@ class MaintenanceError(Exception):
 def checkout():
     root = Path(__file__).resolve().parents[2]
     if not (root / "pyproject.toml").is_file() or not (root / ".git").exists():
-        raise MaintenanceError("this command needs an editable install from a Git checkout")
+        raise MaintenanceError("this command needs an editable install from a Git checkout; "
+                               "a Homebrew install updates with: brew upgrade jello")
     return root
 
 

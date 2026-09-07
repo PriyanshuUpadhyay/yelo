@@ -125,3 +125,10 @@ def test_failed_hud_build_leaves_running_hud_alone(repository, tmp_path, monkeyp
     with pytest.raises(maintenance.MaintenanceError, match="build failed"):
         maintenance.update(install, with_hud=True)
     assert not any(command[-2:] == ["hud", "stop"] for command in calls)
+
+
+def test_update_outside_a_checkout_names_brew_upgrade(tmp_path, monkeypatch):
+    """`jello update` is for checkouts; a Homebrew install is told what to run instead."""
+    monkeypatch.setattr(maintenance, "__file__", str(tmp_path / "libexec/jello/maintenance.py"))
+    with pytest.raises(maintenance.MaintenanceError, match="brew upgrade jello"):
+        maintenance.checkout()
