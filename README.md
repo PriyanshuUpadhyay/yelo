@@ -224,3 +224,7 @@ Tests use temporary account homes and test credentials. The fetch tests use a lo
 HTTP server. Swift tests cover usage parsing, history, layout, and the HUD's local
 read command. Source files under `docs/decisions` record earlier project decisions;
 the scope above describes the current product.
+
+## License
+
+MIT. See `LICENSE`.
