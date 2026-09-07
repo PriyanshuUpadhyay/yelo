@@ -193,7 +193,7 @@ def test_fetch_claude_writes_caches(bench):
     finally:
         endpoint.close()
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "pri: ok\n"
+    assert result.stdout == "cl·pri: ok\n"
 
     base = json.loads(pathlib.Path(cache_path(bench, ".usage-api-cache.json")).read_text())
     assert base["five_hour"] == {"used_percentage": 43, "resets_at": now + FIVE_HOUR_RESET}
@@ -215,7 +215,7 @@ def test_fetch_without_a_fable_window_leaves_that_cache_alone(bench):
     now = int(time.time())
     endpoint = Endpoint([(200, usage_payload(now, fable=False))])
     try:
-        assert fetch(bench, endpoint).stdout == "pri: ok\n"
+        assert fetch(bench, endpoint).stdout == "cl·pri: ok\n"
     finally:
         endpoint.close()
     assert not os.path.exists(cache_path(bench, ".usage-api-cache-fable.json"))
@@ -231,7 +231,7 @@ def test_fable_write_failure_still_counts_as_a_run(bench):
         result = fetch(bench, endpoint)
     finally:
         endpoint.close()
-    assert result.stdout == "pri: fable-write-failed\n"
+    assert result.stdout == "cl·pri: fable-write-failed\n"
     assert result.returncode == 0
 
 
@@ -267,7 +267,7 @@ def test_fetch_writes_only_api_caches(bench, tmp_path):
         result = fetch(bench, endpoint, CODEX_BIN=codex)
     finally:
         endpoint.close()
-    assert result.stdout == "pri: ok\ncx: ok\n" and result.returncode == 0
+    assert result.stdout == "cl·pri: ok\ncx: ok\n" and result.returncode == 0
     after = tree(bench["home"])
     moved = {os.path.basename(path) for path in after
              if path not in before or after[path] != before[path]}
@@ -286,13 +286,13 @@ def test_server_error_is_fetch_failed(bench):
         result = fetch(bench, endpoint)
     finally:
         endpoint.close()
-    assert result.stdout == "pri: fetch-failed\n" and result.returncode == 1
+    assert result.stdout == "cl·pri: fetch-failed\n" and result.returncode == 1
 
 
 def test_unreachable_endpoint_is_fetch_failed(bench):
     # Port 1 on the loopback refuses at once: a network failure, not an HTTP answer.
     result = fetch(bench, JELLO_USAGE_API_URL="http://127.0.0.1:1/usage")
-    assert result.stdout == "pri: fetch-failed\n" and result.returncode == 1
+    assert result.stdout == "cl·pri: fetch-failed\n" and result.returncode == 1
 
 
 @pytest.mark.parametrize("literal", ["1e999", "NaN"])
@@ -308,7 +308,7 @@ def test_non_finite_numbers_are_not_a_window(bench, tmp_path, literal):
         result = fetch(bench, endpoint, CODEX_BIN=codex)
     finally:
         endpoint.close()
-    assert result.stdout == "pri: fetch-failed\ncx: ok\n", "one line per account, census order"
+    assert result.stdout == "cl·pri: fetch-failed\ncx: ok\n", "one line per account, census order"
     # The reference exits 0 while any account succeeded, and a traceback would have taken
     # the codex line with it.
     assert result.returncode == 0
@@ -371,7 +371,7 @@ def test_a_redirect_is_never_followed(bench):
         target.close()
     assert hop.calls == 1
     assert target.calls == 0 and target.requests == [], "no request reached the second origin"
-    assert result.stdout == "pri: fetch-failed\n" and result.returncode == 1
+    assert result.stdout == "cl·pri: fetch-failed\n" and result.returncode == 1
     assert TOKEN not in result.stdout and TOKEN not in result.stderr
     assert not os.path.exists(cache_path(bench, ".usage-api-cache.json"))
 
@@ -386,7 +386,7 @@ def test_a_body_that_quotes_the_token_never_prints_it(bench):
         result = fetch(bench, endpoint, USAGE_HUD_FETCH_DEBUG="1", USAGE_HUD_FETCH_DUMP="1")
     finally:
         endpoint.close()
-    assert result.stdout == "pri: ok\n" and result.returncode == 0
+    assert result.stdout == "cl·pri: ok\n" and result.returncode == 0
     assert "<token>" in result.stderr, "the echo was printed, redacted"
     assert TOKEN not in result.stdout and TOKEN not in result.stderr
     for base, _, names in os.walk(str(bench["home"])):
@@ -422,7 +422,7 @@ def test_fetch_codex(bench, tmp_path):
     finally:
         endpoint.close()
     assert result.returncode == 0
-    assert result.stdout == "pri: ok\ncx: ok\n", "census order: claude first, then codex"
+    assert result.stdout == "cl·pri: ok\ncx: ok\n", "census order: claude first, then codex"
     written = json.loads(
         pathlib.Path(os.path.join(directory, ".usage-hud-api-cache.json")).read_text())
     assert written["rate_limits"]["primary"] == {"used_percent": 30, "window_minutes": 10080,
@@ -440,7 +440,7 @@ def test_fetch_codex_without_a_binary(bench):
         result = fetch(bench, endpoint)
     finally:
         endpoint.close()
-    assert result.stdout == "pri: fetch-failed\ncx: fetch-failed\n"
+    assert result.stdout == "cl·pri: fetch-failed\ncx: fetch-failed\n"
     assert result.returncode == 1
 
 

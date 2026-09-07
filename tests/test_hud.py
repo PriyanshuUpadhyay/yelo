@@ -129,6 +129,8 @@ def hud(tmp_path):
             self.codesign_log = logs / "codesign"
             self.launchctl_log = logs / "launchctl"
             self.state = logs / "launch-state"
+            # The PATH the last `run` handed the command, which install copies into the plist.
+            self.path = None
 
         def run(self, *argv, **overrides):
             env = env_for(home, dotfiles, **overrides)
@@ -140,6 +142,7 @@ def hud(tmp_path):
             env["JELLO_TEST_LAUNCHCTL_LOG"] = str(self.launchctl_log)
             env["JELLO_TEST_LAUNCH_STATE"] = str(self.state)
             env.update(overrides)
+            self.path = env["PATH"]
             return run_jello(list(argv), env)
 
         def calls(self, log):
@@ -194,8 +197,9 @@ def test_install_bundle_and_plist(hud):
         "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": str(hud.home / "Library" / "Logs" / "jello-hud.out.log"),
         "StandardErrorPath": str(hud.home / "Library" / "Logs" / "jello-hud.err.log"),
-        # launchd gives the job no PATH, so the absolute launcher is the whole point.
-        "EnvironmentVariables": {"JELLO_BIN": str(hud.jello_binary)},
+        # launchd gives the job no PATH, so the absolute launcher and the installing
+        # shell's PATH (a fetch resolves `codex` through it) are both carried across.
+        "EnvironmentVariables": {"JELLO_BIN": str(hud.jello_binary), "PATH": hud.path},
     }
     assert hud.calls(hud.launchctl_log) == [], "install never calls launchctl"
 

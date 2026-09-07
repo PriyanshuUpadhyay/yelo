@@ -380,7 +380,7 @@ def run(args):
     """Every account concurrently, one status line each in census order, exit 0 unless
     every account failed."""
     del args
-    jobs = [(name, fetch_claude, (name, directory, identity))
+    jobs = [(core.hud_label("claude", {"name": name}), fetch_claude, (name, directory, identity))
             for name, directory, identity in profiles()]
     jobs += [(core.hud_label("codex", row), fetch_codex, (core.hud_label("codex", row), row["dir"]))
              for row in core.codex_rows()]

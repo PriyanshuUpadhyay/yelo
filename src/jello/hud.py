@@ -117,6 +117,11 @@ def info_plist_document():
 
 
 def plist_document(home):
+    # launchd gives the job no user PATH, and a fetch resolves `codex` (and any other CLI)
+    # only through the PATH `jello hud install` ran with.
+    environment = {"JELLO_BIN": launcher_path()}
+    if os.environ.get("PATH"):
+        environment["PATH"] = os.environ["PATH"]
     return {
         "Label": LABEL,
         "ProgramArguments": [binary_path(home)],
@@ -124,7 +129,7 @@ def plist_document(home):
         "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": os.path.join(home, LOGS_RELATIVE, "jello-hud.out.log"),
         "StandardErrorPath": os.path.join(home, LOGS_RELATIVE, "jello-hud.err.log"),
-        "EnvironmentVariables": {"JELLO_BIN": launcher_path()},
+        "EnvironmentVariables": environment,
     }
 
 
