@@ -15,14 +15,17 @@ also requires the Xcode Command Line Tools.
 With Homebrew:
 
 ```sh
+brew tap priyanshuupadhyay/tap
+brew trust --formula priyanshuupadhyay/tap/jello   # Homebrew 6 or newer
 brew install priyanshuupadhyay/tap/jello
 jello setup
 jello hud install && jello hud start
 ```
 
 Homebrew builds the CLI and the HUD app on your Mac during install; `jello hud install`
-copies the app into `~/Applications`. Update with `brew upgrade jello`. `jello update` is
-for Git checkouts only.
+copies the app into `~/Applications`. Update with `brew upgrade priyanshuupadhyay/tap/jello`.
+`jello update` is for Git checkouts only. Use the full formula name: homebrew-core has an
+unrelated formula also called `jello`.
 
 From a clone of this repository:
 
