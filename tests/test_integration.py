@@ -1,4 +1,4 @@
-"""Installed profile selection works without Jello or its checkout on the import path."""
+"""Installed profile selection works without Yelo or its checkout on the import path."""
 
 import json
 import os
@@ -14,7 +14,7 @@ import time
 import pytest
 
 from conftest import build_usage_home
-from jello import integration
+from yelo import integration
 
 
 @pytest.fixture
@@ -39,8 +39,8 @@ exit 23
     if not zsh:
         pytest.skip("zsh is not installed")
     env = {"HOME": str(home), "PATH": str(binaries),
-           "AGENT_PROFILES_SECURITY_BIN": "/usr/bin/true", "PYTHONPATH": "/missing/jello"}
-    shell = shlex.quote(str(home / ".config/jello/shell.sh"))
+           "AGENT_PROFILES_SECURITY_BIN": "/usr/bin/true", "PYTHONPATH": "/missing/yelo"}
+    shell = shlex.quote(str(home / ".config/yelo/shell.sh"))
     return home, zsh, env, f"source {shell}\n"
 
 
@@ -52,7 +52,7 @@ def run(installed, command, **env):
 
 @pytest.mark.parametrize("cli,name,suffix", [("claude", "pri", ".claude/.profiles/pri"),
                                              ("codex", "alt", ".codex-alt")])
-def test_named_selection_without_jello(installed, cli, name, suffix):
+def test_named_selection_without_yelo(installed, cli, name, suffix):
     home, _, _, _ = installed
     result = run(installed, f"{cli} --profile {name} 'hello world' '$(touch forbidden)'")
     assert result.returncode == 23, result.stderr
@@ -171,7 +171,7 @@ def test_help_passes_through_without_account_selection(installed, cli):
 
 
 def test_current_shell_can_replace_the_obsolete_wrapper(installed):
-    from jello import legacy
+    from yelo import legacy
 
     home, zsh, env, source = installed
     old = home / "old.zsh"
@@ -185,10 +185,10 @@ def test_current_shell_can_replace_the_obsolete_wrapper(installed):
 
 
 def test_foreign_integration_file_is_not_overwritten(installed):
-    from jello import setup
+    from yelo import setup
 
     home, _, _, _ = installed
-    path = home / ".config/jello/shell.sh"
+    path = home / ".config/yelo/shell.sh"
     path.write_text("# My custom shell integration\n")
     with pytest.raises(setup.SetupError, match="another owner"):
         integration.apply(str(home))

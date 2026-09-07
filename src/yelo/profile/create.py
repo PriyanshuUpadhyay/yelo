@@ -9,7 +9,7 @@ Every refusal is raised before the confirmation prompt, and the prompt runs befo
 first write, so a create either happens whole or leaves the tree as it was.
 
 The account's launcher is written last, so `claude profile create sid` leaves a `claude-sid`
-command behind and nobody has to remember `jello setup launchers` (jello.launchers). Its
+command behind and nobody has to remember `yelo setup launchers` (yelo.launchers). Its
 path is checked with the other refusals, before anything is made: the success line names
 that command, so an account cannot be created into one somebody else owns.
 """
@@ -25,8 +25,8 @@ from .. import launchers
 LABELS = {"claude": "claude", "codex": "codex"}
 DISPLAY = {"claude": "Claude", "codex": "Codex"}
 USAGE = {
-    "claude": "usage: jello profile create --cli claude NAME [--email ADDR] [--yes]",
-    "codex": "usage: jello profile create --cli codex NAME [--yes]",
+    "claude": "usage: yelo profile create --cli claude NAME [--email ADDR] [--yes]",
+    "codex": "usage: yelo profile create --cli codex NAME [--yes]",
 }
 # Companions shared with the base Codex home. Missing sources are skipped.
 CODEX_LINKS = ("hooks.json", "AGENTS.md")
@@ -175,13 +175,13 @@ def create(cli, name, home=None, email=None, yes=False):
     elif cli == "codex":
         message = write_codex(name, directory, home)
     # The home exists from here on, so a launcher that cannot be written is reported as
-    # exactly that rather than swallowed: `jello setup launchers` finishes the job.
+    # exactly that rather than swallowed: `yelo setup launchers` finishes the job.
     try:
         path = launchers.write_one(cli, name, directory, home)
     except OSError as error:
         raise CreateError(
             f"{label}: created {directory}, but its launcher could not be written: "
-            f"{error}. Run `jello setup launchers` to finish.", 1) from None
+            f"{error}. Run `yelo setup launchers` to finish.", 1) from None
     return f"{message}\nWrote {path}." if path else message
 
 

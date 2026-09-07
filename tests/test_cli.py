@@ -14,13 +14,13 @@ import time
 
 import pytest
 
-import jello as jello_pkg
-from conftest import (build_census_home, build_usage_home, fixture_env, run_jello,
+import yelo as yelo_pkg
+from conftest import (build_census_home, build_usage_home, fixture_env, run_yelo,
                       usage_env)
 
 ROOT = pathlib.Path(__file__).parent.parent
 GOLDEN = ROOT / "tests" / "golden"
-SOURCE = ROOT / "src" / "jello"
+SOURCE = ROOT / "src" / "yelo"
 CLIS = ("claude", "codex")
 # The signed label rule (R9), written out here rather than imported, so the census counts
 # by the rule instead of by the same function the code under test uses.
@@ -31,10 +31,10 @@ CENSUS_EXCLUDED = {"bad name", "-lead", ".hidden", ".session-map", "notes.txt",
 
 
 @pytest.mark.parametrize("cli", CLIS)
-def test_list_matches_golden(jello, cli):
+def test_list_matches_golden(yelo, cli):
     """The goldens were rendered once from the reference script against this same fixture
     HOME; see tests/golden/README.md."""
-    result = jello("profile", "list", "--cli", cli)
+    result = yelo("profile", "list", "--cli", cli)
     assert result.returncode == 0, result.stderr
     assert result.stdout == (GOLDEN / f"list-{cli}.txt").read_text()
 
@@ -66,7 +66,7 @@ def test_profile_census_matches_layout(tmp_path, cli):
     """L3: no phantom row and no missed home. The layout carries a valid name, an invalid
     one, a hidden dot directory, a plain file, and a codex home with no sessions/ marker."""
     home = build_census_home(tmp_path / "census")
-    result = run_jello(["profile", "list", "--cli", cli, "--json"], fixture_env(home))
+    result = run_yelo(["profile", "list", "--cli", cli, "--json"], fixture_env(home))
     assert result.returncode == 0, result.stderr
     rows = json.loads(result.stdout)
     expected = census(home, cli)
@@ -75,26 +75,26 @@ def test_profile_census_matches_layout(tmp_path, cli):
     assert [row["name"] for row in rows if row["name"] in CENSUS_EXCLUDED] == []
 
 
-def test_resolve_exit_codes(jello):
-    home = jello.home
-    exact = jello("profile", "resolve", "--cli", "claude", "--", "pri")
+def test_resolve_exit_codes(yelo):
+    home = yelo.home
+    exact = yelo("profile", "resolve", "--cli", "claude", "--", "pri")
     assert exact.returncode == 0
     assert exact.stdout == f"pri\t{os.path.join(home, '.claude', '.profiles', 'pri')}\n"
 
-    substring = jello("profile", "resolve", "--cli", "claude", "--", "wor")
+    substring = yelo("profile", "resolve", "--cli", "claude", "--", "wor")
     assert substring.returncode == 0
     assert substring.stdout.split("\t")[0] == "work"
 
-    email = jello("profile", "resolve", "--cli", "codex", "--", "alt@example.test")
+    email = yelo("profile", "resolve", "--cli", "codex", "--", "alt@example.test")
     assert email.returncode == 0
     assert email.stdout.split("\t")[0] == "alt"
 
-    ambiguous = jello("profile", "resolve", "--cli", "claude", "--", "e")
+    ambiguous = yelo("profile", "resolve", "--cli", "claude", "--", "e")
     assert ambiguous.returncode == 2
     assert ambiguous.stderr.startswith("claude: 'e' matches several profiles\n")
     assert "pri" in ambiguous.stderr and "work" in ambiguous.stderr
 
-    missing = jello("profile", "resolve", "--cli", "claude", "--", "zzz")
+    missing = yelo("profile", "resolve", "--cli", "claude", "--", "zzz")
     assert missing.returncode == 1
     assert missing.stderr == "claude: no profile matches 'zzz'\n"
     assert missing.stdout == ""
@@ -124,7 +124,7 @@ def private_attributes(path):
 
 def test_public_apis_only():
     """R1: product code uses the standard library's public surface only, so an interpreter
-    upgrade cannot take a private attribute out from under jello."""
+    upgrade cannot take a private attribute out from under yelo."""
     private = {str(path.relative_to(SOURCE)): sorted(set(private_attributes(path)))
                for path in sorted(SOURCE.rglob("*.py"))
                if list(private_attributes(path))}
@@ -132,7 +132,7 @@ def test_public_apis_only():
 
 
 def test_stdlib_only():
-    """R1: jello runs on every prompt through a shell hook, so it may not import anything
+    """R1: yelo runs on every prompt through a shell hook, so it may not import anything
     that is not already in the interpreter.
 
     `sys.stdlib_module_names` is the interpreter's own answer, and the interpreter is the
@@ -143,7 +143,7 @@ def test_stdlib_only():
     for path in sorted(SOURCE.rglob("*.py")):
         extra = sorted(
             root for root in imported_roots(path)
-            if root and root != "jello" and root not in sys.stdlib_module_names
+            if root and root != "yelo" and root not in sys.stdlib_module_names
         )
         if extra:
             outside[str(path.relative_to(SOURCE))] = extra
@@ -173,22 +173,22 @@ SUBCOMMANDS = {
 }
 
 
-def test_help_lists_every_group(jello):
-    result = jello("--help")
+def test_help_lists_every_group(yelo):
+    result = yelo("--help")
     assert result.returncode == 0
     for group in GROUPS:
         assert group in result.stdout
 
 
-def test_supported_groups_registered(jello):
+def test_supported_groups_registered(yelo):
     """C01: the groups are on the root parser, in order, and each one lists exactly the
     subcommands R1 names."""
-    root = jello("--help")
+    root = yelo("--help")
     assert root.returncode == 0
     assert choice_list(root.stdout) == list(GROUPS), root.stdout
 
     for group, expected in SUBCOMMANDS.items():
-        result = jello(group, "--help")
+        result = yelo(group, "--help")
         assert result.returncode == 0, result.stderr
         listed = subcommands_of(result.stdout)
         assert listed == set(expected), (group, listed)
@@ -212,16 +212,16 @@ def test_help_needs_no_host(tmp_path):
     env = {"HOME": str(tmp_path), "PATH": str(tmp_path)}
     for argv in (["--help"], ["profile", "--help"], ["usage", "--help"],
                  ["setup", "--help"], ["doctor", "--help"], ["hud", "--help"]):
-        result = run_jello(argv, env)
+        result = run_yelo(argv, env)
         assert result.returncode == 0, (argv, result.stderr)
         assert result.stdout
 
 
-def test_version(jello):
+def test_version(yelo):
     """C01: the version R1 names."""
-    result = jello("--version")
+    result = yelo("--version")
     assert result.returncode == 0
-    assert result.stdout.strip() == "jello 0.4.0"
+    assert result.stdout.strip() == "yelo 0.5.0"
 
 
 # --- the trailing-argv hook (board A3, chair ruling cli-extras-hook) -----------------------
@@ -230,7 +230,7 @@ def test_version(jello):
 def test_a_subcommand_without_the_hook_gets_argparses_own_error(tmp_path):
     """Every other subcommand keeps argparse's message and its exit 2, unchanged."""
     env = {"HOME": str(tmp_path), "PATH": str(tmp_path)}
-    result = run_jello(["doctor", "--nope"], env)
+    result = run_yelo(["doctor", "--nope"], env)
     assert result.returncode == 2
     assert "unrecognized arguments: --nope" in result.stderr
 
@@ -252,7 +252,7 @@ def enumeration_calls(tree):
 
 
 def test_usage_enumerates_only_through_core():
-    """Law L2: one census. jello.usage never walks the layout itself — it asks core for the
+    """Law L2: one census. yelo.usage never walks the layout itself — it asks core for the
     rows — so no enumeration inside it may name .profiles, .codex, or .prime. The one
     exception is the rollout scan INSIDE a single codex home whose path core already handed
     over: a file scan under a known directory, not a discovery of accounts."""
@@ -277,16 +277,16 @@ def test_usage_enumerates_only_through_core():
     assert scans[0][1].endswith("'rollout-*.jsonl')"), scans[0]
 
 
-def test_import_direction(jello):
+def test_import_direction(yelo):
     """Law L2: core is the census, so it may not reach back into the modules that read it.
-    Importing core must not drag in jello.usage or jello.hud."""
-    result = run_jello(["--version"], fixture_env(jello.home))
+    Importing core must not drag in yelo.usage or yelo.hud."""
+    result = run_yelo(["--version"], fixture_env(yelo.home))
     assert result.returncode == 0
     probe = subprocess.run(
         [sys.executable, "-c",
-         "import sys, jello.profile.core; "
+         "import sys, yelo.profile.core; "
          "print(sorted(m for m in sys.modules "
-         "if m.startswith('jello.usage') or m == 'jello.hud'))"],
+         "if m.startswith('yelo.usage') or m == 'yelo.hud'))"],
         capture_output=True, text=True,
         env=os.environ | {"PYTHONPATH": str(ROOT / "src")},
     )
@@ -294,9 +294,9 @@ def test_import_direction(jello):
     assert probe.stdout.strip() == "[]"
 
 
-def test_core_no_longer_shells_out_for_usage(jello):
+def test_core_no_longer_shells_out_for_usage(yelo):
     """R5: the subprocess stand-in is gone, name and knob together."""
-    from jello.profile import core
+    from yelo.profile import core
 
     assert not hasattr(core, "usage_data_rows")
     for path in sorted(SOURCE.rglob("*.py")):
@@ -310,30 +310,30 @@ def test_list_usage_in_process(tmp_path):
     home = build_usage_home(tmp_path / "home", now)
     env = usage_env(home)
     env["PATH"] = "/nonexistent"
-    listing = run_jello(["profile", "list", "--cli", "claude", "--usage"], env)
+    listing = run_yelo(["profile", "list", "--cli", "claude", "--usage"], env)
     assert listing.returncode == 0, listing.stderr
     assert "5h 57% left" in listing.stdout, listing.stdout
     assert "no data" in listing.stdout, "the profile with no cache has no usage rows"
 
-    picked = run_jello(["profile", "pick", "--cli", "claude", "--json"], env)
+    picked = run_yelo(["profile", "pick", "--cli", "claude", "--json"], env)
     assert picked.returncode == 0, picked.stderr
     assert json.loads(picked.stdout)["name"] == "pri", (
         "pri is 21 minutes from wasting 57% of its 5h window; work has a whole one ahead")
 
 
-def test_version_is_the_package_version(jello):
-    result = jello("--version")
+def test_version_is_the_package_version(yelo):
+    result = yelo("--version")
     assert result.returncode == 0
-    assert result.stdout.strip() == f"jello {jello_version()}"
+    assert result.stdout.strip() == f"yelo {yelo_version()}"
 
 
-def jello_version():
+def yelo_version():
     """pyproject.toml and __init__.py both carry the version, and `--version` prints it, so
     they may not drift apart."""
     text = (ROOT / "pyproject.toml").read_text()
     for line in text.splitlines():
         if line.startswith("version = "):
             declared = line.split("=", 1)[1].strip().strip('"')
-            assert declared == jello_pkg.__version__
+            assert declared == yelo_pkg.__version__
             return declared
     raise AssertionError("pyproject.toml has no version line")

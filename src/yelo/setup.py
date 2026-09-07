@@ -1,19 +1,19 @@
-"""`jello setup [step ...]`: install profiles and shell integration, idempotently.
+"""`yelo setup [step ...]`: install profiles and shell integration, idempotently.
 
 Two setup steps:
 
   launchers  standalone zsh integration and selector, plus one executable per account under ~/.local/bin -- `claude-sid`, `codex-thine`,
              each three lines that exec the vendor binary with that
-             account's environment. See jello.launchers.
+             account's environment. See yelo.launchers.
   profiles   ~/.claude/.profiles, mode 700.
 
 Every step answers two questions with the same code: `apply(home)` makes the target so and
 says whether it changed, `check(home)` re-derives the verdict from the filesystem alone and
-never writes -- that is what `jello doctor` calls, and why doctor cannot be fooled by
+never writes -- that is what `yelo doctor` calls, and why doctor cannot be fooled by
 setup's own bookkeeping.
 
 A target owned by dotfiles is never overwritten. Ownership is a fact about the filesystem:
-a symlink whose realpath lands inside ~/dotfiles. JELLO_DOTFILES_ROOT relocates that root
+a symlink whose realpath lands inside ~/dotfiles. YELO_DOTFILES_ROOT relocates that root
 for tests.
 
 """
@@ -53,7 +53,7 @@ class Step:
 
 
 def dotfiles_root():
-    root = os.environ.get("JELLO_DOTFILES_ROOT") or os.path.join(
+    root = os.environ.get("YELO_DOTFILES_ROOT") or os.path.join(
         os.path.expanduser("~"), "dotfiles"
     )
     return os.path.realpath(root)

@@ -2,8 +2,8 @@
 import pathlib
 
 from conftest import build_usage_home
-from jello.profile import core
-from jello.usage import snapshot
+from yelo.profile import core
+from yelo.usage import snapshot
 
 
 def test_snapshot_reads_usage_without_credentials_or_subprocesses(tmp_path, monkeypatch):
@@ -38,7 +38,7 @@ def test_removed_providers_cannot_be_installed(bench):
 def test_setup_leaves_old_prime_launchers_alone(bench):
     bench.launchers.mkdir(parents=True)
     launcher = bench.launchers / "prime-agent-work"
-    content = "#!/bin/sh\n# written by jello setup launchers: account work\nexit 0\n"
+    content = "#!/bin/sh\n# written by yelo setup launchers: account work\nexit 0\n"
     launcher.write_text(content)
     assert bench.run("setup").returncode == 0
     assert launcher.read_text() == content

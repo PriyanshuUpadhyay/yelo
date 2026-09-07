@@ -4,15 +4,15 @@ These optional shortcuts bypass the account menu. Each is a file under
 `~/.local/bin`, three lines long:
 
     #!/bin/sh
-    # written by jello setup launchers: account sid
+    # written by yelo setup launchers: account sid
     exec env AGENT_PROFILE_LABEL=sid CLAUDE_PROFILE_DIR=... claude "$@"
 
-So `claude-sid` is a command, `codex-thine` is a command, and nothing of jello runs when
+So `claude-sid` is a command, `codex-thine` is a command, and nothing of yelo runs when
 one starts. The vendor name is bare, so PATH answers at run time: a `claude` reinstalled
 somewhere else needs no launcher rewritten.
 
 Line 2 is the whole ownership rule, and it works in both directions. A regular file
-carrying it is jello's: it is rewritten whenever the account's environment changes, and
+carrying it is yelo's: it is rewritten whenever the account's environment changes, and
 removed when the account does. Anything else at the same path -- a file without the line, or
 any symlink at all -- belongs to somebody else and is reported and left exactly as it is.
 
@@ -27,7 +27,7 @@ import tempfile
 from .profile import core
 
 BIN_RELATIVE = (".local", "bin")
-HEADER = "# written by jello setup launchers: account "
+HEADER = "# written by yelo setup launchers: account "
 KEPT = "kept"
 # (cli, the command name's prefix, the vendor binary). The prefix is the CLI's own name, so
 LAUNCHERS = (("claude", "claude", "claude"),
@@ -60,7 +60,7 @@ def text(cli, name, directory, home, binary):
 
 
 def rows(home):
-    """(path, wanted text) for every account that can have a launcher, in `jello profile`
+    """(path, wanted text) for every account that can have a launcher, in `yelo profile`
     order. `core` is the one census: a row it does not report has no launcher here.
 
     `core` reads the layout of the HOME this process was started with, which is the `home`
@@ -85,7 +85,7 @@ def path_for(cli, name, home):
 
 
 def ours(path):
-    """Whether the file at `path` is a launcher jello wrote, by its second line alone.
+    """Whether the file at `path` is a launcher yelo wrote, by its second line alone.
 
     A symlink is never ours, whatever it points at. This module writes regular files, so a
     link at one of these names is somebody else's arrangement -- and reading line 2 through
@@ -133,7 +133,7 @@ def state(path, body):
     if not os.path.lexists(path):
         return setup.CHANGED, path
     if not ours(path):
-        return KEPT, f"not a jello launcher: {path}"
+        return KEPT, f"not a yelo launcher: {path}"
     try:
         with open(path, encoding="utf-8") as handle:
             current = handle.read()
@@ -145,12 +145,12 @@ def state(path, body):
 
 
 def orphans(home, wanted):
-    """Launchers jello wrote whose account is gone.
+    """Launchers yelo wrote whose account is gone.
 
     The wanted set comes from the account census, so one of our files that is not in it
     names an account nobody has any more -- and it is still an executable command on PATH,
     which is exactly why it has to be found. `ours` is what keeps a symlink out of this
-    list, so the only thing ever unlinked here is a regular file jello wrote.
+    list, so the only thing ever unlinked here is a regular file yelo wrote.
     """
     directory = bin_dir(home)
     known = {path for path, _ in wanted}
@@ -170,7 +170,7 @@ def orphans(home, wanted):
 def foreign(cli, name, home):
     """The launcher path when a file that is not ours already holds it, else None.
 
-    `jello profile create` asks this before it makes the account: a success line that names
+    `yelo profile create` asks this before it makes the account: a success line that names
     a command belonging to somebody else is a lie, and the account would have to be deleted
     by hand to undo it. `write_one` is gated on the same rule through `state`, so the two
     cannot disagree about who owns a path.
@@ -190,14 +190,14 @@ def apply_launchers(home):
     for path, body in wanted:
         verdict, _ = state(path, body)
         if verdict == KEPT:
-            kept.append(f"kept, not a jello launcher: {path}")
+            kept.append(f"kept, not a yelo launcher: {path}")
         elif verdict == setup.CHANGED:
             try:
                 write(path, body)
             except OSError as error:
                 raise setup.SetupError(str(error), path) from None
             written.append(path)
-    # An account that is gone leaves a command that still runs, and it is jello's own file
+    # An account that is gone leaves a command that still runs, and it is yelo's own file
     # to take back. Removing it is the only part of this step that deletes anything, which
     # is why it may only ever touch a file carrying the header.
     removed = []
@@ -217,7 +217,7 @@ def apply_launchers(home):
 
 
 def check_launchers(home):
-    """The `jello doctor` row, which names its faults rather than counting them.
+    """The `yelo doctor` row, which names its faults rather than counting them.
 
     A stale launcher is `missing`, not `ok`. Two things earn that word, and both are files
     a shell would run: one carrying an account's old directory, and one whose account is
@@ -231,7 +231,7 @@ def check_launchers(home):
     for path, body in wanted:
         verdict, _ = state(path, body)
         if verdict == KEPT:
-            kept.append(f"kept, not a jello launcher: {path}")
+            kept.append(f"kept, not a yelo launcher: {path}")
         elif verdict == setup.CHANGED:
             (absent if not os.path.lexists(path) else stale).append(path)
     stale += orphans(home, wanted)
@@ -246,7 +246,7 @@ def check_launchers(home):
 
 
 def write_one(cli, name, directory, home):
-    """The launcher for one account, written by `jello profile create` right after its
+    """The launcher for one account, written by `yelo profile create` right after its
     folder. A foreign file at that path is left alone, exactly as the step would."""
     from . import setup
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the `profile list` goldens ONCE, from the reference script.
 
-The goldens are the output of the script jello was ported from, so the port is compared
+The goldens are the output of the script yelo was ported from, so the port is compared
 against the thing it replaces rather than against itself. Run it by hand only:
 
     uv run --with pytest python tests/golden/render.py

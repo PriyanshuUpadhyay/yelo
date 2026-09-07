@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The resolver's own tests, ported from ~/.claude/scripts/test_agent_profiles.py.
 
-Only two things changed: the module is imported as `jello.profile.core` instead of being
-loaded from a file path, and the subprocess runs `jello profile ...` instead of the script.
+Only two things changed: the module is imported as `yelo.profile.core` instead of being
+loaded from a file path, and the subprocess runs `yelo profile ...` instead of the script.
 Every assertion is the original one.
 """
 import getpass
@@ -17,10 +17,10 @@ import tempfile
 import time
 import unittest
 
-from jello.profile import core as agent_profiles
-from jello.usage import fetch as usage_fetch
+from yelo.profile import core as agent_profiles
+from yelo.usage import fetch as usage_fetch
 
-JELLO = [sys.executable, "-m", "jello.cli", "profile"]
+YELO = [sys.executable, "-m", "yelo.cli", "profile"]
 SECURITY_STUB = """#!/usr/bin/env python3
 import json, os, sys
 
@@ -131,7 +131,7 @@ class Pick(unittest.TestCase):
                 "AGENT_PROFILES_SECURITY_BIN": "/usr/bin/true",
             }
             result = subprocess.run(
-                JELLO + ["pick", "--cli", "claude", "--json"],
+                YELO + ["pick", "--cli", "claude", "--json"],
                 capture_output=True, text=True, env=env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -168,7 +168,7 @@ class Sessions(unittest.TestCase):
     def run_sessions(self, root, cwd, *flags):
         env = os.environ | {"AGENT_PROFILES_CODEX_GLOB_ROOT": str(root)}
         result = subprocess.run(
-            JELLO + ["sessions", "--cli", "codex", "--json", *flags],
+            YELO + ["sessions", "--cli", "codex", "--json", *flags],
             capture_output=True, text=True, env=env, cwd=cwd,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

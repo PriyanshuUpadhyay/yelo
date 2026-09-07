@@ -25,7 +25,7 @@ jobs:
       - name: Prepare source archive
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: uv run jello release --tag "$RELEASE_TAG"
+        run: uv run yelo release --tag "$RELEASE_TAG"
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}

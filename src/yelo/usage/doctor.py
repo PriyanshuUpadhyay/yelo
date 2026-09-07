@@ -1,4 +1,4 @@
-"""`jello usage doctor`: a read-only health check of the usage pipeline.
+"""`yelo usage doctor`: a read-only health check of the usage pipeline.
 
 `usage-hud-doctor` ported, keeping its five sections and its `PASS: `, `WARN: `, `FAIL: `
 line shape. Two things change. The snapshot, the profile list, the credential probe, and
@@ -22,7 +22,7 @@ from . import fetch, snapshot
 
 CACHE_NAMES = (snapshot.BASE_CACHE, snapshot.FABLE_CACHE,
                snapshot.API_CACHE, snapshot.API_FABLE_CACHE)
-LOG_NAMES = ("jello-hud.out.log", "jello-hud.err.log",
+LOG_NAMES = ("yelo-hud.out.log", "yelo-hud.err.log",
              "usage-hud.out.log", "usage-hud.err.log")
 TOKEN_MARKERS = ("Bearer ", "accessToken", "eyJ")
 # A window age beyond ten years is a clock or a schema fault, not an age.
@@ -141,7 +141,7 @@ def check_freshness(report, rows, now):
 
 def legacy_loaded():
     """The dotfiles job, read but never addressed: before the cutover it is what actually
-    draws the HUD, so the jello job being absent is expected, not a fault."""
+    draws the HUD, so the yelo job being absent is expected, not a fault."""
     try:
         result = subprocess.run(
             ["launchctl", "print", f"gui/{os.getuid()}/{hud.LEGACY_LABEL}"],
@@ -158,20 +158,20 @@ def check_liveness(report, home):
         report.passed(f"{hud.LABEL} running (pid {pid})")
     elif loaded:
         report.fail(f"{hud.LABEL} loaded but not running — "
-                    f"check {os.path.join(home, 'Library', 'Logs', 'jello-hud.err.log')}")
+                    f"check {os.path.join(home, 'Library', 'Logs', 'yelo-hud.err.log')}")
     elif legacy_loaded():
         report.warn(f"{hud.LABEL} not loaded; the dotfiles job {hud.LEGACY_LABEL} still "
-                    "draws the HUD — cut over with jello hud install, then jello hud start")
+                    "draws the HUD — cut over with yelo hud install, then yelo hud start")
     else:
         report.fail(f"{hud.LABEL} not loaded — the usage HUD is not running "
-                    "(jello hud install, then jello hud start)")
+                    "(yelo hud install, then yelo hud start)")
     bundle = hud.binary_path(home)
     plist = hud.plist_path(home)
     for label, path in (("bundle", bundle), ("LaunchAgent", plist)):
         if os.path.isfile(path):
             report.passed(f"HUD {label} present: {path}")
         else:
-            report.warn(f"HUD {label} absent: {path} (jello hud install writes it)")
+            report.warn(f"HUD {label} absent: {path} (yelo hud install writes it)")
 
 
 def check_credentials(report, accounts):
@@ -185,7 +185,7 @@ def check_credentials(report, accounts):
             report.passed(f"{name}: OAuth token readable from Keychain")
         elif os.path.isfile(os.path.join(directory, ".credentials.json")):
             report.warn(f"{name}: .credentials.json present but no Keychain item — "
-                        "jello usage fetch reads the Keychain only, so this profile never "
+                        "yelo usage fetch reads the Keychain only, so this profile never "
                         "refreshes from the API")
         else:
             report.warn(f"{name}: no OAuth credential source — API refresh reports "

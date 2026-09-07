@@ -3,7 +3,7 @@
 Every binary the fetch shells out to is a stub on PATH or pinned by an environment
 variable, and the usage endpoint is an http.server bound to 127.0.0.1 on an ephemeral
 port, so nothing here reaches the real Keychain, the real API, or the real HOME. The
-stand-ins are owed one real `jello usage fetch` in the stage 11 member walk.
+stand-ins are owed one real `yelo usage fetch` in the stage 11 member walk.
 """
 
 import hashlib
@@ -16,8 +16,8 @@ import time
 
 import pytest
 
-from conftest import codex_auth, fixture_env, run_jello, write
-from jello.usage import fetch as fetch_module
+from conftest import codex_auth, fixture_env, run_yelo, write
+from yelo.usage import fetch as fetch_module
 
 TOKEN = "sk-ant-oat-FIXTURE-TOKEN-3f9c1d"
 FIVE_HOUR_RESET = 1290
@@ -174,9 +174,9 @@ def bench(tmp_path):
 def fetch(bench, endpoint=None, **overrides):
     environment = dict(bench["env"])
     if endpoint is not None:
-        environment["JELLO_USAGE_API_URL"] = endpoint.url
+        environment["YELO_USAGE_API_URL"] = endpoint.url
     environment.update(overrides)
-    return run_jello(["usage", "fetch"], environment)
+    return run_yelo(["usage", "fetch"], environment)
 
 
 def cache_path(bench, name):
@@ -291,7 +291,7 @@ def test_server_error_is_fetch_failed(bench):
 
 def test_unreachable_endpoint_is_fetch_failed(bench):
     # Port 1 on the loopback refuses at once: a network failure, not an HTTP answer.
-    result = fetch(bench, JELLO_USAGE_API_URL="http://127.0.0.1:1/usage")
+    result = fetch(bench, YELO_USAGE_API_URL="http://127.0.0.1:1/usage")
     assert result.stdout == "cl·pri: fetch-failed\n" and result.returncode == 1
 
 
@@ -401,7 +401,7 @@ def test_a_failed_request_raises_nothing(monkeypatch):
     for the token to ride out on. The endpoint is closed under the request to force it."""
     endpoint = Endpoint([(200, {})])
     endpoint.close()
-    monkeypatch.setenv("JELLO_USAGE_API_URL", endpoint.url)
+    monkeypatch.setenv("YELO_USAGE_API_URL", endpoint.url)
     assert fetch_module.request_usage(TOKEN) == (None, None)
 
 
@@ -449,7 +449,7 @@ def test_fetch_codex_without_a_binary(bench):
 def test_fetch_no_profiles(tmp_path):
     home = tmp_path / "empty"
     os.makedirs(str(home))
-    result = run_jello(["usage", "fetch"], fixture_env(home))
+    result = run_yelo(["usage", "fetch"], fixture_env(home))
     assert result.stdout == "" and result.returncode == 1
 
 

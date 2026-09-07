@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jello import integration, legacy, setup
+from yelo import integration, legacy, setup
 
 
 def test_setup_migrates_known_shell_and_keeps_backup(bench, monkeypatch):

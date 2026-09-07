@@ -1,6 +1,6 @@
 """C01-C06: the snapshot judged against the reference data feed.
 
-The goldens are rendered once, from the bash+jq script jello's snapshot was rewritten
+The goldens are rendered once, from the bash+jq script yelo's snapshot was rewritten
 from, by
 
     cd /Users/me/work/jello/wt/main
@@ -24,9 +24,9 @@ import time
 
 import pytest
 
-from conftest import (build_usage_home, codex_auth, fixture_env, rollout, run_jello,
+from conftest import (build_usage_home, codex_auth, fixture_env, rollout, run_yelo,
                       statusline_cache, usage_env, write)
-from jello.usage import snapshot
+from yelo.usage import snapshot
 
 SECURITY_PROBE_STUB = '''#!/usr/bin/env python3
 """Stand-in for `security`: records every argv, then answers "the item exists"."""
@@ -46,7 +46,7 @@ SEVEN_DAY_RESET = 264630
 def show(home, *flags, **overrides):
     env = usage_env(home)
     env.update(overrides)
-    return run_jello(["usage", "show", *flags], env)
+    return run_yelo(["usage", "show", *flags], env)
 
 
 def rows_of(result):
@@ -100,7 +100,7 @@ def test_show_matches_golden(tmp_path):
 
 
 def test_show_table_matches_golden(tmp_path):
-    """The human table is the one surface with no reference, so its golden is jello's own."""
+    """The human table is the one surface with no reference, so its golden is yelo's own."""
     now = int(time.time())
     home = build_usage_home(tmp_path / "home", now)
     result = show(home)
@@ -192,7 +192,7 @@ def test_row_states(tmp_path):
     assert offline == [{"label": "cl·pri", "provider": "claude", "state": "offline",
                         "reason": "no data", "canFetch": True}]
 
-    logged_out = rows_of(run_jello(["usage", "show", "--json"], fixture_env(home)))
+    logged_out = rows_of(run_yelo(["usage", "show", "--json"], fixture_env(home)))
     assert logged_out == offline, "local reads do not inspect sign-in state"
 
 
@@ -351,7 +351,7 @@ def test_unreadable_cache_and_error_shape(tmp_path):
         os.chmod(root, 0o755)
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == f"jello: usage show: cannot read the claude profile root ({root})\n"
+    assert result.stderr == f"yelo: usage show: cannot read the claude profile root ({root})\n"
 
 
 # --- R12 -------------------------------------------------------------------------------

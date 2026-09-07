@@ -1,34 +1,34 @@
-# Installed by jello profile integration.
-# Selection runs from a self-contained archive, independent of the Jello installation.
+# Installed by yelo profile integration.
+# Selection runs from a self-contained archive, independent of the Yelo installation.
 _cprofile_valid_name() {
   case "$1" in ''|[![:alnum:]]*|*[![:alnum:]_.-]*) return 1 ;; esac
 }
 
 # Both CLIs resolve names, aliases, emails, and unique substrings through the same code.
-_jello_profiles() {
+_yelo_profiles() {
   if [[ "$1" == create ]]; then
-    command jello profile "$@"
+    command yelo profile "$@"
   else
     command python3 -I __RUNTIME_PATH__ "$@"
   fi
 }
 
 # Prints "<canonical name>\t<home dir>"; the name is empty for a codex home with no label yet.
-_jello_profile_resolve() { # $1 = claude|codex  $2 = query
-  _jello_profiles resolve --cli "$1" -- "$2"
+_yelo_profile_resolve() { # $1 = claude|codex  $2 = query
+  _yelo_profiles resolve --cli "$1" -- "$2"
 }
 
-# Numbered menu on stderr, choice read from stdin, same output as _jello_profile_resolve.
+# Numbered menu on stderr, choice read from stdin, same output as _yelo_profile_resolve.
 # Callers must check both TTYs first: the menu is unreadable in a pipe and the read would hang.
-_jello_profile_pick() { # $1 = claude|codex
+_yelo_profile_pick() { # $1 = claude|codex
   local cli="$1" menu reply n line model
   shift
   local -a names dirs texts fields model_args=()
   if [[ "$cli" == claude ]]; then
-    model="$(_jello_profiles model "$@")" || return 1
+    model="$(_yelo_profiles model "$@")" || return 1
     model_args=(--model "$model")
   fi
-  menu="$(_jello_profiles menu --cli "$cli" "${model_args[@]}")" || return 1
+  menu="$(_yelo_profiles menu --cli "$cli" "${model_args[@]}")" || return 1
   # (ps:\t:) keeps empty fields, which `read` would collapse — a codex home with no label
   # yet has an empty name and would otherwise shift its dir into the name.
   for line in "${(f)menu}"; do
@@ -51,15 +51,15 @@ _cprofile_manage() {
   case "$action" in
     list)
       [ "$#" -eq 0 ] || { print -u2 "usage: claude profile list"; return 2; }
-      _jello_profiles list --cli claude --usage
+      _yelo_profiles list --cli claude --usage
       ;;
     create)
       # Creation stays with the installer; put the name after -- so it cannot become a flag.
       if [ "$#" -eq 0 ]; then
-        _jello_profiles create --cli claude
+        _yelo_profiles create --cli claude
       else
         name="$1"; shift
-        _jello_profiles create --cli claude "$@" -- "$name"
+        _yelo_profiles create --cli claude "$@" -- "$name"
       fi
       ;;
     *)
@@ -149,11 +149,11 @@ _cprofile() {
   done
   kind="$(_claude_launch_kind "${args[@]}")"
   if [ -n "$profile" ]; then
-    resolved="$(_jello_profile_resolve claude "$profile")" || return 2
+    resolved="$(_yelo_profile_resolve claude "$profile")" || return 2
   elif (( seen_profile )); then
     # Valueless --profile: an explicit request to choose, so no other source applies.
     [ -t 0 ] && [ -t 1 ] || { print -u2 "claude: --profile requires a name"; return 2; }
-    resolved="$(_jello_profile_pick claude "${args[@]}")" || return 2
+    resolved="$(_yelo_profile_pick claude "${args[@]}")" || return 2
   fi
   # Existing session maps retain the owning account across terminal restores.
   # They outrank the ambient account; an invalid map falls through to an explicit choice.
@@ -162,7 +162,7 @@ _cprofile() {
     if [ -f "$map_file" ] && [ ! -L "$map_file" ]; then
       IFS= read -r mapped < "$map_file" 2>/dev/null || :
       if _cprofile_valid_name "$mapped"; then
-        resolved="$(_jello_profile_resolve claude "$mapped" 2>/dev/null)"
+        resolved="$(_yelo_profile_resolve claude "$mapped" 2>/dev/null)"
         [ -z "$resolved" ] || touch "$map_file" 2>/dev/null  # keeps the prune off a live session
       fi
     fi
@@ -173,7 +173,7 @@ _cprofile() {
   fi
   # Still nothing → inherit the spawning session's profile (agent panes/subshells carry this env).
   if [ -z "$resolved" ] && [ -n "${AGENT_PROFILE_LABEL:-}" ]; then
-    resolved="$(_jello_profile_resolve claude "$AGENT_PROFILE_LABEL")" || return 2
+    resolved="$(_yelo_profile_resolve claude "$AGENT_PROFILE_LABEL")" || return 2
   fi
   if [ -z "$resolved" ] && [ "$kind" = plumbing ]; then
     _claude_binary "${args[@]}"
@@ -184,19 +184,19 @@ _cprofile() {
       print -u2 "claude: auth needs --profile NAME; run 'claude profile list' to see accounts"
       return 2
     }
-    resolved="$(_jello_profile_pick claude "${args[@]}")" || return 2
+    resolved="$(_yelo_profile_pick claude "${args[@]}")" || return 2
   fi
   if [ -z "$resolved" ] && (( resuming )); then
     [[ -t 0 && -t 1 ]] || { print -u2 "claude: resume needs --profile NAME"; return 2; }
-    resolved="$(_jello_profile_pick claude "${args[@]}")" || return 2
+    resolved="$(_yelo_profile_pick claude "${args[@]}")" || return 2
   fi
   # Nothing named this account, so spend the one about to waste the most usage rather than always
   # the same one. A pick that cannot be judged is an error, never a default profile.
   local autopick=
   if [ -z "$resolved" ]; then
     local startup_model
-    startup_model="$(_jello_profiles model "${args[@]}")" || return 2
-    resolved="$(_jello_profiles pick --cli claude --model "$startup_model")" || {
+    startup_model="$(_yelo_profiles model "${args[@]}")" || return 2
+    resolved="$(_yelo_profiles pick --cli claude --model "$startup_model")" || {
       print -u2 "claude: --profile NAME is required; run 'claude profile list' to see available profiles"
       return 2
     }
@@ -240,14 +240,14 @@ _codexprofile_manage() {
   case "$action" in
     list)
       [ "$#" -eq 0 ] || { print -u2 "usage: codex profile list"; return 2; }
-      _jello_profiles list --cli codex --usage
+      _yelo_profiles list --cli codex --usage
       ;;
     create)
       if [ "$#" -eq 0 ]; then
-        _jello_profiles create --cli codex
+        _yelo_profiles create --cli codex
       else
         name="$1"; shift
-        _jello_profiles create --cli codex "$@" -- "$name"
+        _yelo_profiles create --cli codex "$@" -- "$name"
       fi
       ;;
     sessions)
@@ -267,7 +267,7 @@ _codexprofile_manage() {
             ;;
         esac
       done
-      _jello_profiles sessions --cli codex "${opts[@]}"
+      _yelo_profiles sessions --cli codex "${opts[@]}"
       ;;
     *)
       print -u2 "usage: codex profile {list|create NAME [--yes]|sessions [--all] [--limit N] [--json]}"
@@ -353,10 +353,10 @@ function codex {
   local resolved="" autopick="" subcommand=""
   subcommand="$(_codex_subcommand "${args[@]}")"
   if [[ -n "$profile" ]]; then
-    resolved="$(_jello_profile_resolve codex "$profile")" || return 2
+    resolved="$(_yelo_profile_resolve codex "$profile")" || return 2
   elif (( seen_profile )); then
     [[ -t 0 && -t 1 ]] || { print -u2 "codex: --profile requires a name"; return 2; }
-    resolved="$(_jello_profile_pick codex)" || return 2
+    resolved="$(_yelo_profile_pick codex)" || return 2
   elif [[ -z "${CODEX_HOME:-}" ]]; then
     case "$subcommand" in
       --help|-h|--version|-V|mcp|app-server|completion|debug|cloud|features|apply|update|doctor|remote-control|exec-server) ;;
@@ -365,10 +365,10 @@ function codex {
           print -u2 "codex: $subcommand needs --profile NAME; run 'codex profile list' to see accounts"
           return 2
         }
-        resolved="$(_jello_profile_pick codex)" || return 2
+        resolved="$(_yelo_profile_pick codex)" || return 2
         ;;
       *)
-        resolved="$(_jello_profiles pick --cli codex)" || {
+        resolved="$(_yelo_profiles pick --cli codex)" || {
           print -u2 "codex: no account could be picked; pass --profile NAME"
           return 2
         }
@@ -386,8 +386,8 @@ function codex {
     [[ -n "$autopick" ]] && print -u2 "codex: using profile '${profile_name:-${profile_dir:t}}' (expiring usage first; --profile overrides)"
   fi
 
-  # Launch policy belongs to the host, not to jello: the Herdr checks and the Codex config
-  # baseline the dotfiles wrapper ran here are whatever defines _codex_host_guard. jello
+  # Launch policy belongs to the host, not to yelo: the Herdr checks and the Codex config
+  # baseline the dotfiles wrapper ran here are whatever defines _codex_host_guard. yelo
   # never defines it, and without it the binary runs directly. The guard classifies by the
   # scanned subcommand, not args[1], so a global option in front of it (`codex -C /tmp
   # exec …`) cannot walk past the check.

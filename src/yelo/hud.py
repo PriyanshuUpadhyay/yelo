@@ -1,4 +1,4 @@
-"""`jello hud`: build the Usage HUD app and run it as a LaunchAgent.
+"""`yelo hud`: build the Usage HUD app and run it as a LaunchAgent.
 
 Three commands, one target each:
 
@@ -9,18 +9,18 @@ Three commands, one target each:
   start    bootstrap the LaunchAgent into gui/<uid>; already running is success.
   stop     boot it out; already stopped is success.
 
-launchd hands the job no user PATH, so the plist carries the absolute path of the jello
-launcher in JELLO_BIN and the app reaches `jello usage show --json` through it.
+launchd hands the job no user PATH, so the plist carries the absolute path of the yelo
+launcher in YELO_BIN and the app reaches `yelo usage show --json` through it.
 
 A target another package owns is never overwritten. Ownership is setup's rule and setup's
-code: a symlink whose realpath lands inside ~/dotfiles. `CHECKS` hands `jello doctor` the
+code: a symlink whose realpath lands inside ~/dotfiles. `CHECKS` hands `yelo doctor` the
 same two verdicts, re-derived from the filesystem alone -- doctor never calls launchctl,
 so its answer cannot depend on whether the job happens to be up.
 
-JELLO_HUD_LABEL and JELLO_HUD_PACKAGE relocate the label and the Swift package for tests
-and for the rehearsal; JELLO_DOTFILES_ROOT relocates the ownership root, as in setup.
-JELLO_HUD_BUNDLE names an already-built .app to copy instead of compiling, and JELLO_BIN
-names the launcher to record: a Homebrew install builds the app once and reaches jello
+YELO_HUD_LABEL and YELO_HUD_PACKAGE relocate the label and the Swift package for tests
+and for the rehearsal; YELO_DOTFILES_ROOT relocates the ownership root, as in setup.
+YELO_HUD_BUNDLE names an already-built .app to copy instead of compiling, and YELO_BIN
+names the launcher to record: a Homebrew install builds the app once and reaches yelo
 through a stable wrapper, not through the versioned Cellar path sys.argv[0] would show.
 """
 
@@ -34,9 +34,9 @@ import tempfile
 from . import __version__, setup
 
 APP_NAME = "UsageHUD"
-DEFAULT_LABEL = "io.github.priyanshuupadhyay.jello-hud"
-LABEL = os.environ.get("JELLO_HUD_LABEL") or DEFAULT_LABEL
-# The dotfiles job. jello never addresses it; it only reads its plist path for the verdict.
+DEFAULT_LABEL = "io.github.priyanshuupadhyay.yelo-hud"
+LABEL = os.environ.get("YELO_HUD_LABEL") or DEFAULT_LABEL
+# The dotfiles job. yelo never addresses it; it only reads its plist path for the verdict.
 LEGACY_LABEL = "work.example.usage-hud"
 BUNDLE_RELATIVE = os.path.join("Applications", APP_NAME + ".app")
 AGENTS_RELATIVE = os.path.join("Library", "LaunchAgents")
@@ -60,7 +60,7 @@ class HudError(Exception):
 def package_path():
     """The Swift package inside this checkout. The editable install is the only supported
     install, so `apps/UsageHUD` sits two directories above this module."""
-    override = os.environ.get("JELLO_HUD_PACKAGE")
+    override = os.environ.get("YELO_HUD_PACKAGE")
     if override:
         return override
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -89,21 +89,21 @@ def dotfiles_owned(path):
 
 
 def launcher_path():
-    """The absolute `jello` launchd must run, because it inherits no PATH. JELLO_BIN wins:
+    """The absolute `yelo` launchd must run, because it inherits no PATH. YELO_BIN wins:
     a wrapper install knows its own stable path, where `sys.argv[0]` would name a versioned
     one. Otherwise `sys.argv[0]` is the entry point uv installed when the command was typed;
-    a module run (`python -m jello.cli`) leaves a different basename there, so PATH answers
+    a module run (`python -m yelo.cli`) leaves a different basename there, so PATH answers
     instead."""
-    explicit = os.environ.get("JELLO_BIN")
+    explicit = os.environ.get("YELO_BIN")
     if explicit:
         return explicit
     candidate = os.path.realpath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
-    if os.path.basename(candidate) == "jello":
+    if os.path.basename(candidate) == "yelo":
         return candidate
-    found = shutil.which("jello")
+    found = shutil.which("yelo")
     if found:
         return found
-    raise HudError("cannot locate the jello launcher for JELLO_BIN")
+    raise HudError("cannot locate the yelo launcher for YELO_BIN")
 
 
 # --- documents -------------------------------------------------------------------------
@@ -126,8 +126,8 @@ def info_plist_document():
 
 def plist_document(home):
     # launchd gives the job no user PATH, and a fetch resolves `codex` (and any other CLI)
-    # only through the PATH `jello hud install` ran with.
-    environment = {"JELLO_BIN": launcher_path()}
+    # only through the PATH `yelo hud install` ran with.
+    environment = {"YELO_BIN": launcher_path()}
     if os.environ.get("PATH"):
         environment["PATH"] = os.environ["PATH"]
     return {
@@ -135,8 +135,8 @@ def plist_document(home):
         "ProgramArguments": [binary_path(home)],
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
-        "StandardOutPath": os.path.join(home, LOGS_RELATIVE, "jello-hud.out.log"),
-        "StandardErrorPath": os.path.join(home, LOGS_RELATIVE, "jello-hud.err.log"),
+        "StandardOutPath": os.path.join(home, LOGS_RELATIVE, "yelo-hud.out.log"),
+        "StandardErrorPath": os.path.join(home, LOGS_RELATIVE, "yelo-hud.err.log"),
         "EnvironmentVariables": environment,
     }
 
@@ -306,7 +306,7 @@ def install(args):
         if dotfiles_owned(bundle):
             raise HudError("bundle is owned by dotfiles", bundle)
         document = plist_document(home)
-        prebuilt = os.environ.get("JELLO_HUD_BUNDLE")
+        prebuilt = os.environ.get("YELO_HUD_BUNDLE")
         if prebuilt:
             copy_bundle(home, prebuilt)
             print(f"bundle installed from {prebuilt}")
@@ -320,7 +320,7 @@ def install(args):
         return fail("hud install", str(error), error.path)
     except OSError as error:
         return fail("hud install", str(error))
-    print("next: jello hud start")
+    print("next: yelo hud start")
     return 0
 
 
@@ -379,7 +379,7 @@ def stop(args):
 
 def check_usage(home):
     """The four ~/.local/bin/usage-hud-* commands are dotfiles' until the owner cuts over,
-    and a link into dotfiles is the whole verdict. There is no `missing` answer here: jello
+    and a link into dotfiles is the whole verdict. There is no `missing` answer here: yelo
     does not install those links, so their absence is not a fault."""
     directory = os.path.join(home, LOCAL_BIN_RELATIVE)
     try:
@@ -398,7 +398,7 @@ def check_usage(home):
 
 def check_hud(home):
     """The dotfiles LaunchAgent answers first: while it is there the HUD is still dotfiles'
-    whether or not the jello pair also exists, which is exactly the cutover state."""
+    whether or not the yelo pair also exists, which is exactly the cutover state."""
     legacy = legacy_plist_path(home)
     if dotfiles_owned(legacy):
         return setup.OWNED, f"symlink into {setup.dotfiles_root()}: {legacy}"
@@ -412,7 +412,7 @@ def check_hud(home):
 
 
 # `apply` is None: these two are reported, never installed -- `hud install` compiles, and a
-# compile does not belong in `jello setup` (board D9).
+# compile does not belong in `yelo setup` (board D9).
 CHECKS = (
     setup.Step("usage", None, check_usage),
     setup.Step("hud", None, check_hud),

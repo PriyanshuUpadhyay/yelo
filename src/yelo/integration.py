@@ -8,8 +8,8 @@ import zipfile
 
 from . import legacy, launchers
 
-SHELL_HEADER = "# Installed by jello profile integration.\n"
-ARCHIVE_HEADER = b"#!/usr/bin/env python3\n# Installed by jello profile integration.\n"
+SHELL_HEADER = "# Installed by yelo profile integration.\n"
+ARCHIVE_HEADER = b"#!/usr/bin/env python3\n# Installed by yelo profile integration.\n"
 MODULES = ("profile/core.py", "usage/snapshot.py", "usage/fetch.py", "usage/codex.py", "profile_runtime.py")
 
 
@@ -66,8 +66,8 @@ def targets(home):
 
 def source_line(home):
     path = legacy.shell_path(home)
-    if path == os.path.join(home, ".config", "jello", "shell.sh"):
-        return 'source "$HOME/.config/jello/shell.sh"'
+    if path == os.path.join(home, ".config", "yelo", "shell.sh"):
+        return 'source "$HOME/.config/yelo/shell.sh"'
     return "source " + shlex.quote(path)
 
 

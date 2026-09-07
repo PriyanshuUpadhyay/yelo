@@ -6,7 +6,7 @@ import tarfile
 
 import pytest
 
-from jello import maintenance
+from yelo import maintenance
 
 
 def git(root, *args):
@@ -23,9 +23,9 @@ def repository(tmp_path, monkeypatch):
     root = tmp_path / "source"
     root.mkdir()
     git(root, "init", "-b", "main")
-    (root / "pyproject.toml").write_text('[project]\nname = "jello"\nversion = "1.2.3"\n')
-    (root / "src/jello").mkdir(parents=True)
-    (root / "src/jello/__init__.py").write_text('__version__ = "1.2.3"\n')
+    (root / "pyproject.toml").write_text('[project]\nname = "yelo"\nversion = "1.2.3"\n')
+    (root / "src/yelo").mkdir(parents=True)
+    (root / "src/yelo/__init__.py").write_text('__version__ = "1.2.3"\n')
     (root / "apps/UsageHUD").mkdir(parents=True)
     (root / "apps/UsageHUD/Package.swift").write_text("// release fixture\n")
     (root / ".gitignore").write_text("dist/\nprivate.txt\n")
@@ -38,11 +38,11 @@ def test_release_includes_swift_source_and_excludes_ignored_files(repository):
     (repository / "private.txt").write_text("not for release")
     git(repository, "tag", "v1.2.3")
     maintenance.release(repository, repository / "dist", "v1.2.3")
-    archive = repository / "dist/jello-1.2.3.tar.gz"
+    archive = repository / "dist/yelo-1.2.3.tar.gz"
     with tarfile.open(archive) as package:
-        assert "jello-1.2.3/apps/UsageHUD/Package.swift" in package.getnames()
+        assert "yelo-1.2.3/apps/UsageHUD/Package.swift" in package.getnames()
         assert all(not name.endswith("private.txt") for name in package.getnames())
-    assert (archive.parent / "jello-1.2.3.sha256").read_text() == (
+    assert (archive.parent / "yelo-1.2.3.sha256").read_text() == (
         f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n")
     with pytest.raises(maintenance.MaintenanceError, match="already exist"):
         maintenance.release(repository, repository / "dist")
@@ -69,7 +69,7 @@ def test_release_rejects_wrong_tag(repository):
 
 
 def test_release_rejects_inconsistent_version(repository):
-    (repository / "src/jello/__init__.py").write_text('__version__ = "0.1.0"\n')
+    (repository / "src/yelo/__init__.py").write_text('__version__ = "0.1.0"\n')
     git(repository, "add", ".")
     git(repository, "commit", "-m", "Mismatched version")
     with pytest.raises(maintenance.MaintenanceError, match="versions must match"):
@@ -88,7 +88,7 @@ def test_update_fast_forwards_and_uses_new_cli_for_setup(repository, tmp_path, m
     git(repository, "add", ".")
     git(repository, "commit", "-m", "New release")
     monkeypatch.setattr(maintenance.shutil, "which", lambda name: "/fixture/uv")
-    monkeypatch.setattr(maintenance.hud, "launcher_path", lambda: "/fixture/jello")
+    monkeypatch.setattr(maintenance.hud, "launcher_path", lambda: "/fixture/yelo")
     calls = []
     original_run = maintenance.run_command
     def run(command):
@@ -103,7 +103,7 @@ def test_update_fast_forwards_and_uses_new_cli_for_setup(repository, tmp_path, m
     assert (install / "new.txt").read_text() == "new release\n"
     assert calls[1:] == [
         ["/fixture/uv", "tool", "install", "--reinstall", "--editable", str(install)],
-        ["/fixture/jello", "setup"],
+        ["/fixture/yelo", "setup"],
     ]
 
 
@@ -113,7 +113,7 @@ def test_failed_hud_build_leaves_running_hud_alone(repository, tmp_path, monkeyp
     binary = tmp_path / "UsageHUD"
     binary.touch()
     monkeypatch.setattr(maintenance.shutil, "which", lambda name: "/fixture/uv")
-    monkeypatch.setattr(maintenance.hud, "launcher_path", lambda: "/fixture/jello")
+    monkeypatch.setattr(maintenance.hud, "launcher_path", lambda: "/fixture/yelo")
     monkeypatch.setattr(maintenance.hud, "binary_path", lambda home: str(binary))
     monkeypatch.setattr(maintenance.hud, "job_state", lambda: (True, 123))
     calls = []
@@ -128,7 +128,7 @@ def test_failed_hud_build_leaves_running_hud_alone(repository, tmp_path, monkeyp
 
 
 def test_update_outside_a_checkout_names_brew_upgrade(tmp_path, monkeypatch):
-    """`jello update` is for checkouts; a Homebrew install is told what to run instead."""
-    monkeypatch.setattr(maintenance, "__file__", str(tmp_path / "libexec/jello/maintenance.py"))
-    with pytest.raises(maintenance.MaintenanceError, match="brew upgrade jello"):
+    """`yelo update` is for checkouts; a Homebrew install is told what to run instead."""
+    monkeypatch.setattr(maintenance, "__file__", str(tmp_path / "libexec/yelo/maintenance.py"))
+    with pytest.raises(maintenance.MaintenanceError, match="brew upgrade yelo"):
         maintenance.checkout()

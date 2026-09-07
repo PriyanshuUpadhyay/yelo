@@ -12,8 +12,8 @@ import time
 
 import pytest
 
-from conftest import codex_auth, fixture_env, run_jello, write
-from jello.usage import doctor as doctor_module
+from conftest import codex_auth, fixture_env, run_yelo, write
+from yelo.usage import doctor as doctor_module
 
 LAUNCHCTL_STUB = '''#!/usr/bin/env python3
 """Stand-in for `launchctl print`: loaded for the labels named in FAKE_LOADED."""
@@ -26,7 +26,7 @@ if any(target.endswith("/" + name) for name in loaded):
     sys.exit(0)
 sys.exit(113)
 '''
-JELLO_LABEL = "io.github.priyanshuupadhyay.jello-hud"
+YELO_LABEL = "io.github.priyanshuupadhyay.yelo-hud"
 LEGACY_LABEL = "work.example.usage-hud"
 
 
@@ -81,7 +81,7 @@ def bench(tmp_path):
 def doctor(bench, **overrides):
     environment = dict(bench["env"])
     environment.update(overrides)
-    return run_jello(["usage", "doctor"], environment)
+    return run_yelo(["usage", "doctor"], environment)
 
 
 def touch(path, age):
@@ -131,18 +131,18 @@ def test_doctor_matrix(bench, capsys):
     assert leak.returncode == 1
     os.unlink(leaked)
 
-    # Liveness: before the cutover the dotfiles job is what draws the HUD, so the jello job
+    # Liveness: before the cutover the dotfiles job is what draws the HUD, so the yelo job
     # being absent is expected. Only neither job loaded is a FAIL.
     warned = doctor(bench)
-    assert f"WARN: {JELLO_LABEL} not loaded; the dotfiles job {LEGACY_LABEL}" in warned.stdout
+    assert f"WARN: {YELO_LABEL} not loaded; the dotfiles job {LEGACY_LABEL}" in warned.stdout
     assert warned.returncode == 0
 
-    running = doctor(bench, FAKE_LOADED=f"{JELLO_LABEL},{LEGACY_LABEL}")
-    assert f"PASS: {JELLO_LABEL} running (pid 4242)" in running.stdout
+    running = doctor(bench, FAKE_LOADED=f"{YELO_LABEL},{LEGACY_LABEL}")
+    assert f"PASS: {YELO_LABEL} running (pid 4242)" in running.stdout
     assert running.returncode == 0
 
     neither = doctor(bench, FAKE_LOADED="")
-    assert f"FAIL: {JELLO_LABEL} not loaded — the usage HUD is not running" in neither.stdout
+    assert f"FAIL: {YELO_LABEL} not loaded — the usage HUD is not running" in neither.stdout
     assert neither.returncode == 1
 
     # The pct invariant. Only ok and stale rows carry a last confirmed percentage, so no
@@ -189,7 +189,7 @@ def test_leak_scan_fails_on_token_material(bench):
     assert "eyJhbGciOi" not in leaked.stdout, "the scan reports counts, never contents"
     assert leaked.returncode == 1
 
-    write(os.path.join(logs, "jello-hud.out.log"), "accessToken\n")
+    write(os.path.join(logs, "yelo-hud.out.log"), "accessToken\n")
     both = doctor(bench)
     assert "FAIL: 2 pipeline-written file(s)" in both.stdout
 

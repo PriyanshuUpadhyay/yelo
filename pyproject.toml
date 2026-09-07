@@ -1,18 +1,18 @@
 [project]
-name = "jello"
-version = "0.4.0"
+name = "yelo"
+version = "0.5.0"
 description = "Claude and Codex account profiles and a local usage HUD"
 readme = "README.md"
 authors = [
     { name = "PriyanshuUpadhyay" }
 ]
 requires-python = ">=3.11"
-# Standard library only: jello and the scripts it installs run with whatever interpreter the
+# Standard library only: yelo and the scripts it installs run with whatever interpreter the
 # machine has, so neither may pay for an import tree or break on a half-installed environment.
 dependencies = []
 
 [project.scripts]
-jello = "jello.cli:main"
+yelo = "yelo.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.8,<0.13.0"]

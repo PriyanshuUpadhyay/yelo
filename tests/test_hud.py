@@ -1,13 +1,13 @@
-"""C16-C18 and matrix M3: `jello hud` builds the app, installs it, and runs it.
+"""C16-C18 and matrix M3: `yelo hud` builds the app, installs it, and runs it.
 
 Every test runs the real command against a temporary HOME with fake `swift`, `codesign`,
-`launchctl`, and `jello` executables first on `PATH`. Nothing compiles, nothing is signed,
+`launchctl`, and `yelo` executables first on `PATH`. Nothing compiles, nothing is signed,
 and launchd is never asked anything: the fake `launchctl` keeps the loaded label in a file,
 which is enough to walk every cell of matrix M3 and is the only way to prove the start and
 stop flows without touching the live domain (law L3).
 
-`JELLO_HUD_LABEL` pins a throwaway label, `JELLO_HUD_PACKAGE` points at a stub package the
-fake `swift` writes into, and `JELLO_DOTFILES_ROOT` points at a fake dotfiles tree, so the
+`YELO_HUD_LABEL` pins a throwaway label, `YELO_HUD_PACKAGE` points at a stub package the
+fake `swift` writes into, and `YELO_DOTFILES_ROOT` points at a fake dotfiles tree, so the
 ownership refusal is decided by a symlink the test made rather than by this machine.
 """
 
@@ -17,10 +17,10 @@ import stat
 
 import pytest
 
-import jello as jello_package
-from test_setup import env_for, run_jello, tree_digest  # noqa: F401 - shared helpers
+import yelo as yelo_package
+from test_setup import env_for, run_yelo, tree_digest  # noqa: F401 - shared helpers
 
-LABEL = "io.github.priyanshuupadhyay.jello-hud-test"
+LABEL = "io.github.priyanshuupadhyay.yelo-hud-test"
 BUNDLE_RELATIVE = ("Applications", "UsageHUD.app")
 UID = os.getuid()
 
@@ -29,7 +29,7 @@ UID = os.getuid()
 RECORDER = 'printf \'%s\\t\' "$@" >> "$LOG"; printf \'\\n\' >> "$LOG"\n'
 
 FAKE_SWIFT = """#!/bin/sh
-LOG="$JELLO_TEST_SWIFT_LOG"
+LOG="$YELO_TEST_SWIFT_LOG"
 """ + RECORDER + """
 package=""
 while [ $# -gt 0 ]; do
@@ -46,16 +46,16 @@ exit 0
 """
 
 FAKE_CODESIGN = """#!/bin/sh
-LOG="$JELLO_TEST_CODESIGN_LOG"
+LOG="$YELO_TEST_CODESIGN_LOG"
 """ + RECORDER + """exit 0
 """
 
 # `print` answers from the state file, `bootstrap` writes the label the plist names into
 # it, and `bootout` removes it -- the smallest thing that behaves like a launchd domain.
 FAKE_LAUNCHCTL = """#!/bin/sh
-LOG="$JELLO_TEST_LAUNCHCTL_LOG"
+LOG="$YELO_TEST_LAUNCHCTL_LOG"
 """ + RECORDER + """
-state="$JELLO_TEST_LAUNCH_STATE"
+state="$YELO_TEST_LAUNCH_STATE"
 case "$1" in
   print)
     label="${2##*/}"
@@ -67,13 +67,13 @@ case "$1" in
     exit 113
     ;;
   bootstrap)
-    if [ -n "$JELLO_TEST_BOOTSTRAP_FAIL" ]; then
+    if [ -n "$YELO_TEST_BOOTSTRAP_FAIL" ]; then
       printf 'Bootstrap failed: 5: Input/output error\\n' >&2
       exit 5
     fi
     # launchd took the job and it left again: bootstrap succeeds, the state file stays
     # empty, so the next `print` cannot find the label.
-    [ -n "$JELLO_TEST_BOOTSTRAP_VANISH" ] && exit 0
+    [ -n "$YELO_TEST_BOOTSTRAP_VANISH" ] && exit 0
     base="${3##*/}"
     printf '%s' "${base%.plist}" > "$state"
     exit 0
@@ -95,7 +95,7 @@ def executable(path, text):
 @pytest.fixture
 def hud(tmp_path):
     """A temporary HOME, a fake dotfiles tree, a stub Swift package, and a PATH whose
-    first entry holds the four executables `jello hud` is allowed to reach."""
+    first entry holds the four executables `yelo hud` is allowed to reach."""
     home = tmp_path / "home"
     home.mkdir()
     dotfiles = tmp_path / "dotfiles"
@@ -109,8 +109,8 @@ def hud(tmp_path):
     executable(binaries / "swift", FAKE_SWIFT)
     executable(binaries / "codesign", FAKE_CODESIGN)
     executable(binaries / "launchctl", FAKE_LAUNCHCTL)
-    # Never run: `hud install` only needs to find it, to write JELLO_BIN into the plist.
-    executable(binaries / "jello", "#!/bin/sh\nexit 0\n")
+    # Never run: `hud install` only needs to find it, to write YELO_BIN into the plist.
+    executable(binaries / "yelo", "#!/bin/sh\nexit 0\n")
 
     logs = tmp_path / "logs"
     logs.mkdir()
@@ -120,7 +120,7 @@ def hud(tmp_path):
             self.home = home
             self.dotfiles = dotfiles
             self.package = package
-            self.jello_binary = binaries / "jello"
+            self.yelo_binary = binaries / "yelo"
             self.bundle = home.joinpath(*BUNDLE_RELATIVE)
             self.binary = self.bundle / "Contents" / "MacOS" / "UsageHUD"
             self.info = self.bundle / "Contents" / "Info.plist"
@@ -135,15 +135,15 @@ def hud(tmp_path):
         def run(self, *argv, **overrides):
             env = env_for(home, dotfiles, **overrides)
             env["PATH"] = f"{binaries}:{env['PATH']}"
-            env["JELLO_HUD_LABEL"] = LABEL
-            env["JELLO_HUD_PACKAGE"] = str(package)
-            env["JELLO_TEST_SWIFT_LOG"] = str(self.swift_log)
-            env["JELLO_TEST_CODESIGN_LOG"] = str(self.codesign_log)
-            env["JELLO_TEST_LAUNCHCTL_LOG"] = str(self.launchctl_log)
-            env["JELLO_TEST_LAUNCH_STATE"] = str(self.state)
+            env["YELO_HUD_LABEL"] = LABEL
+            env["YELO_HUD_PACKAGE"] = str(package)
+            env["YELO_TEST_SWIFT_LOG"] = str(self.swift_log)
+            env["YELO_TEST_CODESIGN_LOG"] = str(self.codesign_log)
+            env["YELO_TEST_LAUNCHCTL_LOG"] = str(self.launchctl_log)
+            env["YELO_TEST_LAUNCH_STATE"] = str(self.state)
             env.update(overrides)
             self.path = env["PATH"]
-            return run_jello(list(argv), env)
+            return run_yelo(list(argv), env)
 
         def calls(self, log):
             if not log.exists():
@@ -162,7 +162,7 @@ def test_install_bundle_and_plist(hud):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "bundle rebuilt", "plist written", "next: jello hud start"
+        "bundle rebuilt", "plist written", "next: yelo hud start"
     ]
     assert hud.calls(hud.swift_log) == [
         ["build", "-c", "release", "--package-path", str(hud.package)]
@@ -175,7 +175,7 @@ def test_install_bundle_and_plist(hud):
         "CFBundleExecutable": "UsageHUD",
         "CFBundleIdentifier": LABEL,
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": jello_package.__version__,
+        "CFBundleShortVersionString": yelo_package.__version__,
         "LSUIElement": True,
         "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True,
@@ -195,11 +195,11 @@ def test_install_bundle_and_plist(hud):
         "ProgramArguments": [str(hud.binary)],
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
-        "StandardOutPath": str(hud.home / "Library" / "Logs" / "jello-hud.out.log"),
-        "StandardErrorPath": str(hud.home / "Library" / "Logs" / "jello-hud.err.log"),
+        "StandardOutPath": str(hud.home / "Library" / "Logs" / "yelo-hud.out.log"),
+        "StandardErrorPath": str(hud.home / "Library" / "Logs" / "yelo-hud.err.log"),
         # launchd gives the job no PATH, so the absolute launcher and the installing
         # shell's PATH (a fetch resolves `codex` through it) are both carried across.
-        "EnvironmentVariables": {"JELLO_BIN": str(hud.jello_binary), "PATH": hud.path},
+        "EnvironmentVariables": {"YELO_BIN": str(hud.yelo_binary), "PATH": hud.path},
     }
     assert hud.calls(hud.launchctl_log) == [], "install never calls launchctl"
 
@@ -207,7 +207,7 @@ def test_install_bundle_and_plist(hud):
     again = hud.run("hud", "install")
     assert again.returncode == 0, again.stderr
     assert again.stdout.splitlines() == [
-        "bundle rebuilt", "plist unchanged", "next: jello hud start"
+        "bundle rebuilt", "plist unchanged", "next: yelo hud start"
     ]
     assert (hud.plist.read_bytes(), hud.plist.stat().st_mtime_ns) == before
 
@@ -233,7 +233,7 @@ def test_install_refuses_dotfiles_owned(hud, target):
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == f"jello: hud install: {message} ({link})\n"
+    assert result.stderr == f"yelo: hud install: {message} ({link})\n"
     assert hud.calls(hud.swift_log) == [], "no build for a target we will not write"
     assert hud.calls(hud.codesign_log) == []
     assert os.path.islink(link), "the link itself is untouched"
@@ -244,7 +244,7 @@ def test_start_stop_matrix(hud):
     """C18 and matrix M3: the start and stop columns, in the order a user meets them."""
     missing = hud.run("hud", "start")
     assert missing.returncode == 1
-    assert missing.stderr == f"jello: hud start: LaunchAgent not installed ({hud.plist})\n"
+    assert missing.stderr == f"yelo: hud start: LaunchAgent not installed ({hud.plist})\n"
 
     absent_stop = hud.run("hud", "stop")
     assert absent_stop.returncode == 0
@@ -273,10 +273,10 @@ def test_start_reports_a_failed_bootstrap(hud):
     """M3: launchd refusing the job is the error shape, not a silent `running`."""
     assert hud.run("hud", "install").returncode == 0
 
-    result = hud.run("hud", "start", JELLO_TEST_BOOTSTRAP_FAIL="1")
+    result = hud.run("hud", "start", YELO_TEST_BOOTSTRAP_FAIL="1")
 
     assert result.returncode == 1
-    assert result.stderr == f"jello: hud start: launchctl bootstrap failed ({hud.plist})\n"
+    assert result.stderr == f"yelo: hud start: launchctl bootstrap failed ({hud.plist})\n"
     assert result.stdout == ""
 
 
@@ -284,11 +284,11 @@ def test_start_reports_a_job_that_does_not_stay_loaded(hud):
     """M3 and board D8: bootstrap 0 is not enough -- `launchctl print` decides."""
     assert hud.run("hud", "install").returncode == 0
 
-    result = hud.run("hud", "start", JELLO_TEST_BOOTSTRAP_VANISH="1")
+    result = hud.run("hud", "start", YELO_TEST_BOOTSTRAP_VANISH="1")
 
     assert result.returncode == 1
     assert result.stderr == (
-        f"jello: hud start: job did not stay loaded after bootstrap ({hud.plist})\n"
+        f"yelo: hud start: job did not stay loaded after bootstrap ({hud.plist})\n"
     )
     assert result.stdout == ""
     assert ["bootstrap", f"gui/{UID}", str(hud.plist)] in hud.calls(hud.launchctl_log)
@@ -298,10 +298,10 @@ def test_install_refuses_a_package_it_cannot_find(hud):
     """R10: the one error line, naming the path, when the checkout has no Swift package."""
     missing = hud.home / "no-package"
 
-    result = hud.run("hud", "install", JELLO_HUD_PACKAGE=str(missing))
+    result = hud.run("hud", "install", YELO_HUD_PACKAGE=str(missing))
 
     assert result.returncode == 1
-    assert result.stderr == f"jello: hud install: swift package not found ({missing})\n"
+    assert result.stderr == f"yelo: hud install: swift package not found ({missing})\n"
     assert hud.calls(hud.swift_log) == []
 
 
@@ -314,11 +314,11 @@ def test_install_copies_prebuilt_bundle(hud, tmp_path):
     (prebuilt / "Contents" / "Info.plist").write_bytes(
         plistlib.dumps({"CFBundleName": "UsageHUD"}))
 
-    result = hud.run("hud", "install", JELLO_HUD_BUNDLE=str(prebuilt))
+    result = hud.run("hud", "install", YELO_HUD_BUNDLE=str(prebuilt))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        f"bundle installed from {prebuilt}", "plist written", "next: jello hud start"
+        f"bundle installed from {prebuilt}", "plist written", "next: yelo hud start"
     ]
     assert hud.calls(hud.swift_log) == [], "a prebuilt bundle is never compiled again"
     assert hud.binary.read_text() == "prebuilt UsageHUD binary\n"
@@ -326,24 +326,24 @@ def test_install_copies_prebuilt_bundle(hud, tmp_path):
 
 
 def test_install_refuses_missing_prebuilt_bundle(hud, tmp_path):
-    """A JELLO_HUD_BUNDLE with no executable inside is the one error line, naming it."""
+    """A YELO_HUD_BUNDLE with no executable inside is the one error line, naming it."""
     empty = tmp_path / "empty.app"
     empty.mkdir()
 
-    result = hud.run("hud", "install", JELLO_HUD_BUNDLE=str(empty))
+    result = hud.run("hud", "install", YELO_HUD_BUNDLE=str(empty))
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == f"jello: hud install: prebuilt bundle not found ({empty})\n"
+    assert result.stderr == f"yelo: hud install: prebuilt bundle not found ({empty})\n"
     assert hud.calls(hud.swift_log) == []
     assert not hud.bundle.exists()
 
 
 def test_plist_records_explicit_launcher(hud):
-    """A wrapper install names its own stable path in JELLO_BIN; the plist takes it as
+    """A wrapper install names its own stable path in YELO_BIN; the plist takes it as
     given, rather than resolving the launcher that happened to run."""
-    result = hud.run("hud", "install", JELLO_BIN="/opt/x/bin/jello")
+    result = hud.run("hud", "install", YELO_BIN="/opt/x/bin/yelo")
 
     assert result.returncode == 0, result.stderr
     document = plistlib.loads(hud.plist.read_bytes())
-    assert document["EnvironmentVariables"]["JELLO_BIN"] == "/opt/x/bin/jello"
+    assert document["EnvironmentVariables"]["YELO_BIN"] == "/opt/x/bin/yelo"

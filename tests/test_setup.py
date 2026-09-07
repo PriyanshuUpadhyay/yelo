@@ -1,8 +1,8 @@
-"""C15-C17, C30 and laws L2, L5: `jello setup` installs its targets and then changes nothing.
+"""C15-C17, C30 and laws L2, L5: `yelo setup` installs its targets and then changes nothing.
 
 Every test runs the real command against a temporary HOME with the XDG roots pinned inside
 it, so nothing under the real `$HOME` is read or written (R8), and with
-`JELLO_DOTFILES_ROOT` pointed at a fake dotfiles tree, so the ownership verdict is decided
+`YELO_DOTFILES_ROOT` pointed at a fake dotfiles tree, so the ownership verdict is decided
 by a symlink the test made rather than by whatever this machine happens to have. The
 `bench` fixture, `SEEDED_SETTINGS`, and `tree_digest` live in conftest.py, because the
 Herdr and Prime install suites need exactly the same bench.
@@ -19,17 +19,17 @@ import subprocess
 
 import pytest
 
-from jello import setup
+from yelo import setup
 from conftest import (SEEDED_SETTINGS, build_fixture_home, env_for,  # noqa: F401
-                      run_jello, tree_digest)
+                      run_yelo, tree_digest)
 
-HUD_LABEL = "io.github.priyanshuupadhyay.jello-hud"
+HUD_LABEL = "io.github.priyanshuupadhyay.yelo-hud"
 # The launcher names conftest's fixture account layout produces.
 ACCOUNTS = {"claude-pri", "claude-work", "codex-base", "codex-alt"}
 
 
 def install_hud_targets(home):
-    """The two targets `jello doctor` reads for its `hud` row. A HOME without them is
+    """The two targets `yelo doctor` reads for its `hud` row. A HOME without them is
     matrix M4 row 4 -- `hud missing`, exit 1 -- which would drown out what the tests below
     are actually about: the setup steps."""
     agents = home / "Library" / "LaunchAgents"
@@ -78,7 +78,7 @@ def test_a_launcher_carries_the_accounts_environment(bench):
     assert bench.run("setup", "launchers").returncode == 0
     lines = (bench.launchers / "claude-pri").read_text().splitlines()
 
-    assert lines[1] == "# written by jello setup launchers: account pri"
+    assert lines[1] == "# written by yelo setup launchers: account pri"
     profile = os.path.join(str(bench.home), ".claude", ".profiles", "pri")
     assert lines[2] == (
         f"exec env AGENT_PROFILE_LABEL=pri CLAUDE_PROFILE_DIR={profile} "
@@ -92,7 +92,7 @@ def test_a_launcher_carries_the_accounts_environment(bench):
 
 
 @pytest.mark.parametrize("cli,account", [("claude", "pri"), ("codex", "alt")])
-def test_launchers_work_without_jello_on_path(bench, tmp_path, cli, account):
+def test_launchers_work_without_yelo_on_path(bench, tmp_path, cli, account):
     """Installed account commands need only the shell and vendor CLI, even after uninstall."""
     seed_accounts(bench)
     assert bench.run("setup", "launchers").returncode == 0
@@ -102,7 +102,7 @@ def test_launchers_work_without_jello_on_path(bench, tmp_path, cli, account):
         "#!/bin/sh\nprintf '%s\\n' \"$CLAUDE_PROFILE_DIR\" \"$CODEX_HOME\" "
         "\"$@\"\nexit 23\n")
     (vendor / cli).chmod(0o755)
-    # There is no Python interpreter, Jello package, or jello-agent in this PATH.
+    # There is no Python interpreter, Yelo package, or yelo-agent in this PATH.
     (vendor / "env").symlink_to(shutil.which("env"))
     arguments = ["--profile", "deep-review", "a prompt with spaces", "$(touch forbidden)"]
     result = subprocess.run([str(bench.launchers / f"{cli}-{account}"), *arguments],
@@ -117,7 +117,7 @@ def test_launchers_work_without_jello_on_path(bench, tmp_path, cli, account):
 
 def test_a_file_that_is_not_ours_is_kept(bench):
     """Line 2 is the whole ownership rule: a `claude-pri` somebody else wrote keeps its
-    bytes, is named in the report, and never becomes a jello launcher by accident."""
+    bytes, is named in the report, and never becomes a yelo launcher by accident."""
     seed_accounts(bench)
     bench.launchers.mkdir(parents=True, exist_ok=True)
     stranger = bench.launchers / "claude-pri"
@@ -131,8 +131,8 @@ def test_a_file_that_is_not_ours_is_kept(bench):
 
     doctor = bench.run("doctor")
     assert bench.rows(doctor)["launchers"] == "ok", \
-        "somebody else's command at that name is not jello's fault"
-    assert "kept, not a jello launcher" in row_detail(doctor, "launchers")
+        "somebody else's command at that name is not yelo's fault"
+    assert "kept, not a yelo launcher" in row_detail(doctor, "launchers")
 
 
 def test_a_symlink_at_a_wanted_path_is_kept_not_replaced(bench):
@@ -152,12 +152,12 @@ def test_a_symlink_at_a_wanted_path_is_kept_not_replaced(bench):
     assert link.is_symlink(), "the link must survive `setup launchers`"
     assert link.resolve() == real.resolve()
     assert real.read_text() == body, "and its target must be untouched"
-    assert f"kept, not a jello launcher: {link}" in row_detail(result, "launchers")
+    assert f"kept, not a yelo launcher: {link}" in row_detail(result, "launchers")
 
     doctor = bench.run("doctor")
     assert bench.rows(doctor)["launchers"] == "ok", \
-        "somebody else's arrangement at that name is not jello's fault"
-    assert f"kept, not a jello launcher: {link}" in row_detail(doctor, "launchers")
+        "somebody else's arrangement at that name is not yelo's fault"
+    assert f"kept, not a yelo launcher: {link}" in row_detail(doctor, "launchers")
 
 
 def test_a_stale_launcher_is_missing_not_ok(bench):
@@ -178,7 +178,7 @@ def test_a_stale_launcher_is_missing_not_ok(bench):
 
 def test_the_launcher_of_a_deleted_account_is_stale_and_then_removed(bench):
     """R8-F1: an account that leaves the census leaves its command behind, and that command
-    still runs. It is jello's own file -- line 2 says so -- so doctor names it and setup
+    still runs. It is yelo's own file -- line 2 says so -- so doctor names it and setup
     takes it back."""
     seed_accounts(bench)
     assert bench.run("setup", "launchers").returncode == 0
@@ -200,7 +200,7 @@ def test_the_launcher_of_a_deleted_account_is_stale_and_then_removed(bench):
 
 def test_a_foreign_file_is_never_removed_as_an_orphan(bench):
     """The removal may only ever touch a file carrying the header. Somebody else's command
-    at a name jello does not want is not jello's business at all."""
+    at a name yelo does not want is not yelo's business at all."""
     seed_accounts(bench)
     assert bench.run("setup", "launchers").returncode == 0
     stranger = bench.launchers / "claude-stranger"
@@ -231,7 +231,7 @@ def test_every_launcher_goes_when_the_last_account_does(bench):
 
 def test_an_unlabelled_home_gets_no_launcher(bench):
     """The name is the command, so a codex home with no `profile-label` has nothing to be
-    called. It stays reachable through `jello profile`, and through plain `codex`."""
+    called. It stays reachable through `yelo profile`, and through plain `codex`."""
     seed_accounts(bench)
     (bench.home / ".codex" / "profile-label").write_text("\n")
     assert bench.run("setup", "launchers").returncode == 0
@@ -248,7 +248,7 @@ def test_setup_runs_one_named_step(bench):
 
     unknown = bench.run("setup", "nope")
     assert unknown.returncode == 1
-    assert unknown.stderr == "jello: setup: unknown step: nope\n"
+    assert unknown.stderr == "yelo: setup: unknown step: nope\n"
 
 
 def test_setup_never_writes_the_claude_settings(bench):
@@ -293,7 +293,7 @@ def test_profile_root_symlinked_elsewhere_is_an_error(bench):
     result = bench.run("setup", "profiles")
     assert result.returncode == 1
     assert result.stderr == (
-        f"jello: setup: profile root is a symlink outside ~/dotfiles ({bench.profiles})\n")
+        f"yelo: setup: profile root is a symlink outside ~/dotfiles ({bench.profiles})\n")
     assert bench.profiles.is_symlink()
     assert list(elsewhere.iterdir()) == []
 
@@ -308,13 +308,13 @@ def test_setup_json_output(bench):
 
 
 def test_every_account_core_reports_gets_a_launcher(bench):
-    """L2, the one census: `jello.launchers` asks `profile/core` for its rows, so an account
+    """L2, the one census: `yelo.launchers` asks `profile/core` for its rows, so an account
     the profile commands list and a launcher on disk cannot disagree."""
     seed_accounts(bench)
     environment = env_for(bench.home, bench.dotfiles, bench.bin)
     listed = set()
     for cli, prefix in (("claude", "claude"), ("codex", "codex")):
-        result = run_jello(["profile", "list", "--cli", cli, "--json"], environment)
+        result = run_yelo(["profile", "list", "--cli", cli, "--json"], environment)
         assert result.returncode == 0, result.stderr
         listed |= {f"{prefix}-{row['name']}" for row in json.loads(result.stdout)
                    if row["name"]}

@@ -6,7 +6,7 @@ rule, and `tests/golden/usage-show.json` is rendered from the reference itself s
 are compared rather than trusted.
 
 Reads cache files and codex rollouts only. No network, no Keychain, no subprocess, and no
-write of any kind (law L4). Accounts come from `jello.profile.core` (law L2); the only
+write of any kind (law L4). Accounts come from `yelo.profile.core` (law L2); the only
 directory this module lists is one codex home's own `sessions/` tree.
 
 USAGE_HUD_STALE_AFTER (default 900) is the reference's freshness gate, kept by name.

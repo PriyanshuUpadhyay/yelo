@@ -6,7 +6,7 @@ substring of either. There is deliberately NO default and NO fallback profile �
 an unmatched (exit 1) or ambiguous (exit 2) query is an error, because silently
 landing on the wrong account spends the wrong subscription.
 
-Subcommands (wired by jello.profile.commands as `jello profile ...`):
+Subcommands (wired by yelo.profile.commands as `yelo profile ...`):
   list    --cli claude|codex [--usage] [--json]   all rows, aligned table or JSON
   menu    --cli claude|codex                      picker rows: index/name/dir/display (TAB)
   resolve --cli claude|codex QUERY [--json]       name<TAB>dir, or JSON
@@ -14,8 +14,8 @@ Subcommands (wired by jello.profile.commands as `jello profile ...`):
   sessions --cli codex [--all] [--limit N] [--json]     recent sessions, newest first, each
                                                         with the account that owns it
 
---usage joins the Usage HUD rows, which `jello.profile.commands` reads in process
-from `jello.usage.snapshot` and passes in, falling back to each account's own usage
+--usage joins the Usage HUD rows, which `yelo.profile.commands` reads in process
+from `yelo.usage.snapshot` and passes in, falling back to each account's own usage
 cache; it costs a pass over the cache files, so the resolve hot path never asks for it.
 
 AGENT_PROFILES_CLAUDE_ROOT, AGENT_PROFILES_CODEX_GLOB_ROOT,
@@ -337,7 +337,7 @@ def keychain_service(name):
     Claude Code stores each account's OAuth blob under a service that carries the first
     eight hex of sha256 of that account's identity path, so no account rides the bare
     service and a rename can never hand one account another's credentials. The sign-in
-    probe here and the token read in jello.usage.fetch both key off this, so the two can
+    probe here and the token read in yelo.usage.fetch both key off this, so the two can
     never drift apart.
     """
     identity = os.path.join(HOME, f".claude-{name}")
@@ -571,9 +571,9 @@ def add_usage(cli, rows, usage_rows, include_fable=False):
     `urgency` (see urgency(); None when remaining is unknown). With include_fable,
     adds a hard exclusion flag from the model-specific API window, not statusline data.
 
-    `usage_rows` is the Usage HUD snapshot the caller took (jello.profile.commands reads it
-    from jello.usage.snapshot), or None when no snapshot could be taken at all — this
-    module never reaches for it itself, so core stays free of any jello.usage import."""
+    `usage_rows` is the Usage HUD snapshot the caller took (yelo.profile.commands reads it
+    from yelo.usage.snapshot), or None when no snapshot could be taken at all — this
+    module never reaches for it itself, so core stays free of any yelo.usage import."""
     usage_data = usage_rows
     for row in rows:
         windows = usage_data_windows(cli, row, usage_data, include_fable) if usage_data is not None else None

@@ -42,11 +42,11 @@ func snapshotArguments(
     if let script = environment["USAGE_HUD_SCRIPT"] {
         return (script, ["--json"])
     }
-    return (jelloPath(environment: environment), ["usage", "show", "--json"])
+    return (yeloPath(environment: environment), ["usage", "show", "--json"])
 }
 
-private func jelloPath(environment: [String: String]) -> String {
-    environment["JELLO_BIN"] ?? ("~/.local/bin/jello" as NSString).expandingTildeInPath
+private func yeloPath(environment: [String: String]) -> String {
+    environment["YELO_BIN"] ?? ("~/.local/bin/yelo" as NSString).expandingTildeInPath
 }
 
 /// Polls local usage files through the CLI. This path reads no account credentials.
@@ -122,7 +122,7 @@ final class UsageModel: ObservableObject {
          historyStore: HistoryStore = HistoryStore()) {
         self.historyStore = historyStore
         snapshotCommand = snapshotArguments(environment: environment)
-        fetchExecutable = jelloPath(environment: environment)
+        fetchExecutable = yeloPath(environment: environment)
     }
 
     func fetchFromAPI() {
@@ -270,7 +270,7 @@ func runAPIFetch(executable: String, timeout: TimeInterval = 120) -> APIFetchRes
     do {
         try process.run()
     } catch {
-        return APIFetchResult(message: "Could not start Jello. Check its installation.", warning: true)
+        return APIFetchResult(message: "Could not start Yelo. Check its installation.", warning: true)
     }
     let deadline = DispatchWorkItem {
         if process.isRunning { process.terminate() }

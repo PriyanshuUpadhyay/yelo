@@ -392,7 +392,7 @@ struct ExpandedContent: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if model.firstLaunchFailure {
                         emptyState(symbol: "exclamationmark.circle", title: "Usage is unavailable",
-                                   detail: "Check that Jello is installed, then click Refresh.")
+                                   detail: "Check that Yelo is installed, then click Refresh.")
                     } else if model.rows.isEmpty && !model.hasLoadedSnapshot {
                         HStack(spacing: 10) {
                             ProgressView().controlSize(.small)
@@ -401,7 +401,7 @@ struct ExpandedContent: View {
                         .frame(maxWidth: .infinity, minHeight: 150)
                     } else if model.rows.isEmpty {
                         emptyState(symbol: "person.crop.circle.badge.plus", title: "No accounts yet",
-                                   detail: "Add a Claude or Codex profile with Jello.\nUsage appears after you use it.")
+                                   detail: "Add a Claude or Codex profile with Yelo.\nUsage appears after you use it.")
                     } else {
                         let sections = providerSections
                         ForEach(Array(sections.enumerated()), id: \.element.provider) { index, section in

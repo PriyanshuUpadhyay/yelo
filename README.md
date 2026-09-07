@@ -1,10 +1,10 @@
-# jello
+# yelo
 
 Claude and Codex account profiles, with a local usage HUD for macOS.
 
 Use `claude` or `codex` normally. New sessions automatically select an account from
 its available usage. Add `--profile` to choose from a menu, or `--profile NAME` to
-select an account directly. Setup installs the selector separately from Jello.
+select an account directly. Setup installs the selector separately from Yelo.
 
 ## Install
 
@@ -16,23 +16,22 @@ With Homebrew:
 
 ```sh
 brew tap priyanshuupadhyay/tap
-brew trust --formula priyanshuupadhyay/tap/jello   # Homebrew 6 or newer
-brew install priyanshuupadhyay/tap/jello
-jello setup
-jello hud install && jello hud start
+brew trust --formula priyanshuupadhyay/tap/yelo   # Homebrew 6 or newer
+brew install priyanshuupadhyay/tap/yelo
+yelo setup
+yelo hud install && yelo hud start
 ```
 
-Homebrew builds the CLI and the HUD app on your Mac during install; `jello hud install`
-copies the app into `~/Applications`. Update with `brew upgrade priyanshuupadhyay/tap/jello`.
-`jello update` is for Git checkouts only. Use the full formula name: homebrew-core has an
-unrelated formula also called `jello`.
+Homebrew builds the CLI and the HUD app on your Mac during install; `yelo hud install`
+copies the app into `~/Applications`. Update with `brew upgrade priyanshuupadhyay/tap/yelo`.
+`yelo update` is for Git checkouts only.
 
 From a clone of this repository:
 
 ```sh
 uv tool install --editable .
 uv tool update-shell
-jello setup
+yelo setup
 ```
 
 Open a new terminal after setup to load the profile integration. Setup supports zsh
@@ -43,11 +42,11 @@ Installing a wheel is not supported for the HUD.
 ## Add accounts
 
 ```sh
-jello profile create --cli claude work
+yelo profile create --cli claude work
 claude --profile work auth login
 claude --profile work
 
-jello profile create --cli codex personal
+yelo profile create --cli codex personal
 codex --profile personal login
 codex --profile personal
 ```
@@ -56,16 +55,16 @@ Add `--yes` to `profile create` in a non-interactive terminal. Claude also accep
 `--email you@example.com` to label an account.
 
 Existing accounts are discovered under `~/.claude/.profiles/NAME`, `~/.codex`, and
-`~/.codex-NAME`. Run `jello setup launchers` to create or update their commands.
+`~/.codex-NAME`. Run `yelo setup launchers` to create or update their commands.
 A base Codex account can have a name in `~/.codex/profile-label`.
 
 ```sh
-jello profile list --cli claude
-jello profile list --cli codex --usage
-jello profile resolve --cli claude work
-jello profile pick --cli codex
-jello profile sessions --cli codex --all
-jello doctor
+yelo profile list --cli claude
+yelo profile list --cli codex --usage
+yelo profile resolve --cli claude work
+yelo profile pick --cli codex
+yelo profile sessions --cli codex --all
+yelo doctor
 ```
 
 ## Select an account
@@ -109,18 +108,18 @@ In the shell integration, Codex's `--profile NAME` selects an **account**. Use
 `command codex --profile deep-review` bypasses the account wrapper entirely.
 The optional named shortcuts, such as `claude-work` and `codex-personal`, still work.
 
-`~/.config/jello/shell.sh` and `profiles.pyz` contain the installed integration.
+`~/.config/yelo/shell.sh` and `profiles.pyz` contain the installed integration.
 Profile selection, menus, and session launches keep working after `uv tool uninstall
-jello`, provided Python and the vendor CLIs remain installed. The archive contains its
+yelo`, provided Python and the vendor CLIs remain installed. The archive contains its
 own copy of the selector code; it does not import the removed package or checkout.
 Creating new accounts through `claude profile create` or `codex profile create` still
-requires Jello. Existing accounts are discovered each time, without regenerating a list.
+requires Yelo. Existing accounts are discovered each time, without regenerating a list.
 
-Run `jello setup` to update an older integration. It backs up a known generated shell
+Run `yelo setup` to update an older integration. It backs up a known generated shell
 file and preserves `_codex_host_guard`. To load it in the current terminal:
 
 ```sh
-source "$HOME/.config/jello/shell.sh"
+source "$HOME/.config/yelo/shell.sh"
 ```
 
 Custom shell files and symlinks are preserved. If `.zshrc` is a symlink and does not
@@ -133,14 +132,14 @@ account homes or the macOS Keychain; they are not copied into this repository.
 ## UsageHUD
 
 ```sh
-jello hud install
-jello hud start
-jello hud stop
+yelo hud install
+yelo hud start
+yelo hud stop
 ```
 
 The HUD opens at the top of the screen. Move the pointer over the notch to see your
 accounts, or choose **Show usage** from its menu-bar menu. The menu action keeps the
-panel open until you close it. Use **Refresh** or Command-R to run `jello usage fetch`
+panel open until you close it. Use **Refresh** or Command-R to run `yelo usage fetch`
 and display the updated usage. Escape closes the panel. Accounts are grouped by provider with shared usage-window
 columns. Long account lists scroll while Refresh and Close stay visible.
 
@@ -152,20 +151,20 @@ A missing reading is shown as **No sample**, never as zero usage.
 
 Claude readings come from existing `.usage-cache*.json` and `.usage-api-cache*.json`
 files. Codex readings come from `.usage-hud-api-cache.json` and recent session logs.
-Jello does not install a Claude status-line writer. If no cache exists, use the
+Yelo does not install a Claude status-line writer. If no cache exists, use the
 Refresh button or the terminal command below to create one. The HUD reads usage
 amounts and reset times; it does not display session messages.
 
 `hud install` builds `~/Applications/UsageHUD.app` and writes a LaunchAgent. It does
-not start the app. The app label is `io.github.priyanshuupadhyay.jello-hud`.
+not start the app. The app label is `io.github.priyanshuupadhyay.yelo-hud`.
 
 ## Online refresh
 
 ```sh
-jello usage show
-jello usage show --json
-jello usage fetch
-jello usage doctor
+yelo usage show
+yelo usage show --json
+yelo usage fetch
+yelo usage doctor
 ```
 
 `usage show` reads local usage only. It does not read credentials or call the Keychain.
@@ -185,37 +184,37 @@ you need to diagnose a problem; the HUD does not run it.
 ## Update and remove
 
 ```sh
-jello update --check
-jello update
-jello update --hud
+yelo update --check
+yelo update
+yelo update --hud
 ```
 
 `update` fast-forwards the installed Git checkout from its configured upstream,
-reinstalls Jello with `uv`, then runs the updated setup. It stops if there are local
+reinstalls Yelo with `uv`, then runs the updated setup. It stops if there are local
 changes, no upstream, or a merge is needed. It does not switch branches or discard
 work. `--check` checks local prerequisites; it does not fetch remote updates.
 `--hud` also rebuilds an installed HUD and restarts it if it was running. A failed
 build leaves the running app alone. Claude and Codex are updated with their own
 installers.
 
-After a manual source update, run `jello setup launchers`. For HUD changes, run
-`jello hud install`, then stop and start the HUD. An extracted source archive has
+After a manual source update, run `yelo setup launchers`. For HUD changes, run
+`yelo hud install`, then stop and start the HUD. An extracted source archive has
 no Git upstream. Install a newer archive with
-`uv tool install --reinstall --editable PATH`, or use a Git clone for `jello update`.
+`uv tool install --reinstall --editable PATH`, or use a Git clone for `yelo update`.
 
 To remove the HUD, stop it first, then remove `~/Applications/UsageHUD.app` and
-`~/Library/LaunchAgents/io.github.priyanshuupadhyay.jello-hud.plist`. To remove the CLI,
-run `uv tool uninstall jello`. Account homes and credentials remain in place.
+`~/Library/LaunchAgents/io.github.priyanshuupadhyay.yelo-hud.plist`. To remove the CLI,
+run `uv tool uninstall yelo`. Account homes and credentials remain in place.
 
-Jello manages Claude and Codex profiles and UsageHUD only. It does not install Herdr
+Yelo manages Claude and Codex profiles and UsageHUD only. It does not install Herdr
 configuration, plugins, worker scripts, runtime skills, or Prime Agent extensions.
-Existing installations of those tools are independent of Jello.
+Existing installations of those tools are independent of Yelo.
 
 ## Releases
 
 ```sh
-jello release
-jello release --tag v0.4.0
+yelo release
+yelo release --tag v0.5.0
 ```
 
 Run this from a clean, committed checkout. The command creates a versioned source
@@ -227,7 +226,7 @@ version and points at the current commit.
 The GitHub checks run Python tests on Linux and macOS and Swift tests on macOS.
 Pushing a `v*` tag runs these checks, prepares the archive, and creates a draft
 GitHub release with both files attached. Review the draft before publishing it.
-Set matching versions in `pyproject.toml` and `src/jello/__init__.py` before tagging.
+Set matching versions in `pyproject.toml` and `src/yelo/__init__.py` before tagging.
 
 ## Development
 

@@ -4,8 +4,8 @@ import XCTest
 
 final class ProcessContractTests: XCTestCase {
     func testSnapshotRunsOnlyLocalUsageRead() {
-        let command = snapshotArguments(environment: ["JELLO_BIN": "/opt/bin/jello"])
-        XCTAssertEqual(command.executable, "/opt/bin/jello")
+        let command = snapshotArguments(environment: ["YELO_BIN": "/opt/bin/yelo"])
+        XCTAssertEqual(command.executable, "/opt/bin/yelo")
         XCTAssertEqual(command.arguments, ["usage", "show", "--json"])
     }
 
@@ -17,10 +17,10 @@ final class ProcessContractTests: XCTestCase {
 
     func testOldFetchOverrideCannotStartAnOnlineProcess() {
         let command = snapshotArguments(environment: [
-            "JELLO_BIN": "/opt/bin/jello",
+            "YELO_BIN": "/opt/bin/yelo",
             "USAGE_HUD_FETCH_SCRIPT": "/tmp/online-fetch",
         ])
-        XCTAssertEqual(command.executable, "/opt/bin/jello")
+        XCTAssertEqual(command.executable, "/opt/bin/yelo")
         XCTAssertEqual(command.arguments, ["usage", "show", "--json"])
     }
 }

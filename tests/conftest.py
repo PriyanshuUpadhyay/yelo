@@ -1,7 +1,7 @@
-"""One fixture account layout, and one way to run jello against it.
+"""One fixture account layout, and one way to run yelo against it.
 
 Every test that touches the filesystem builds this layout under a temporary HOME and runs
-jello in a subprocess: `core.HOME` is resolved once at import, the way the reference script
+yelo in a subprocess: `core.HOME` is resolved once at import, the way the reference script
 resolves it, so a test cannot move HOME inside its own process. No test reads the real
 ~/.claude, ~/.codex*, ~/.prime, the real Keychain, or the real usage caches.
 
@@ -17,7 +17,7 @@ was called with.
 
 Law L7 does not depend on a test remembering any of that: `sealed_home` is autouse, so
 every test in the suite -- including one that builds its own layout -- starts with HOME,
-`XDG_CACHE_HOME`, `XDG_STATE_HOME`, and `JELLO_DOTFILES_ROOT` inside a temporary tree and
+`XDG_CACHE_HOME`, `XDG_STATE_HOME`, and `YELO_DOTFILES_ROOT` inside a temporary tree and
 with a PATH that carries no `herdr`, `swift`, `claude`, `codex`, `agy`, or `node`.
 """
 
@@ -38,7 +38,7 @@ import pytest
 FALSE_BIN = "/usr/bin/false"
 TRUE_BIN = "/usr/bin/true"
 
-# The binaries jello shells out to. None of them may be reachable by name from a test
+# The binaries yelo shells out to. None of them may be reachable by name from a test
 # process: `herdr` would answer from the live server, `swift` would start a real build, and
 # the three providers would be launched for real. A test that needs one writes a fake and
 # puts it on PATH itself (`bench.fake`, the `hud` fixture, WatcherFixture).
@@ -85,8 +85,8 @@ def sealed_path(tmp_path_factory):
 def sealed_home(tmp_path_factory, monkeypatch, sealed_path):
     """Law L7 for the whole suite, rather than one test at a time (F29).
 
-    Every test starts with HOME, the three XDG roots, and `JELLO_DOTFILES_ROOT` inside a
-    temporary tree, and with a PATH that carries none of the six binaries jello shells out
+    Every test starts with HOME, the three XDG roots, and `YELO_DOTFILES_ROOT` inside a
+    temporary tree, and with a PATH that carries none of the six binaries yelo shells out
     to: a test that forgets to move HOME still cannot read the real ~/.claude or ~/.codex,
     and no test can reach the live Herdr, start a Swift build, or launch a provider. The
     fixtures below still set the same variables explicitly for the subprocess they run --
@@ -101,7 +101,7 @@ def sealed_home(tmp_path_factory, monkeypatch, sealed_path):
     monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
-    monkeypatch.setenv("JELLO_DOTFILES_ROOT", str(sealed / "dotfiles"))
+    monkeypatch.setenv("YELO_DOTFILES_ROOT", str(sealed / "dotfiles"))
     monkeypatch.setenv("PATH", sealed_path)
     # /usr/bin/python3 is Apple's, and it caches its bytecode under
     # $HOME/Library/Caches/com.apple.python: a write into the HOME under test that no test
@@ -219,7 +219,7 @@ def fixture_env(home, security_bin=FALSE_BIN):
 
 # --- the W1 usage layout ----------------------------------------------------------------
 # Offsets from `now`, all 30 seconds inside their minute and away from an hour boundary, so
-# the reset strings the reference renders and the ones jello renders later agree.
+# the reset strings the reference renders and the ones yelo renders later agree.
 FIVE_HOUR_RESET = 1290          # 21m30s  -> "21m"
 SEVEN_DAY_RESET = 264630        # 3d1h30m30s -> "3d1h"
 CODEX_RESET = 95430             # 1d2h30m30s -> "1d2h"
@@ -241,7 +241,7 @@ def statusline_cache(now, five, seven):
 
 
 def api_cache(now, five, seven, age):
-    """What `jello usage fetch` writes: one fetch time for both clocks."""
+    """What `yelo usage fetch` writes: one fetch time for both clocks."""
     return {
         "five_hour": {"used_percentage": five, "resets_at": now + FIVE_HOUR_RESET},
         "seven_day": {"used_percentage": seven, "resets_at": now + SEVEN_DAY_RESET},
@@ -310,9 +310,9 @@ def usage_home(tmp_path):
     return build_usage_home(tmp_path / "usage-home", now), now
 
 
-def run_jello(argv, env, cwd=None, stdin=""):
+def run_yelo(argv, env, cwd=None, stdin=""):
     return subprocess.run(
-        [sys.executable, "-m", "jello.cli", *argv],
+        [sys.executable, "-m", "yelo.cli", *argv],
         capture_output=True, text=True, env=env, cwd=cwd, input=stdin,
     )
 
@@ -323,12 +323,12 @@ def fixture_home(tmp_path):
 
 
 @pytest.fixture
-def jello(fixture_home):
-    """Run jello against the fixture HOME; extra environment keys override the defaults."""
+def yelo(fixture_home):
+    """Run yelo against the fixture HOME; extra environment keys override the defaults."""
     def call(*argv, stdin="", cwd=None, **overrides):
         env = fixture_env(fixture_home)
         env.update(overrides)
-        return run_jello(list(argv), env, cwd=cwd, stdin=stdin)
+        return run_yelo(list(argv), env, cwd=cwd, stdin=stdin)
 
     call.home = fixture_home
     return call
@@ -338,9 +338,9 @@ def jello(fixture_home):
 # The bench PATH is the fake-binary directory and nothing else. macOS ships `swift` in
 # /usr/bin, so a PATH with the system directories on it would let a test start a real build
 # (and a machine with `herdr` installed would let one reach the live server). Tests run
-# jello through `sys.executable`, which is absolute, so nothing here needs more; a test that
+# yelo through `sys.executable`, which is absolute, so nothing here needs more; a test that
 # wants `git`, `herdr`, or `swift` writes its own with `bench.fake(...)`.
-# A settings.json shaped like a live one. jello writes none of it: the only row read out of
+# A settings.json shaped like a live one. yelo writes none of it: the only row read out of
 # it is `agents`, which asks whether some SessionStart group runs agent-host-context.py.
 SEEDED_SETTINGS = {
     "$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -390,7 +390,7 @@ def env_for(home, dotfiles, binaries=None, **overrides):
         "XDG_CACHE_HOME": os.path.join(str(home), ".cache"),
         "XDG_CONFIG_HOME": os.path.join(str(home), ".config"),
         "XDG_STATE_HOME": os.path.join(str(home), ".local", "state"),
-        "JELLO_DOTFILES_ROOT": str(dotfiles),
+        "YELO_DOTFILES_ROOT": str(dotfiles),
     }
     env.update(overrides)
     return env
@@ -416,7 +416,7 @@ def bench(tmp_path):
             self.state = home / ".local" / "state"
 
         def run(self, *argv, **overrides):
-            return run_jello(list(argv), env_for(home, dotfiles, binaries, **overrides))
+            return run_yelo(list(argv), env_for(home, dotfiles, binaries, **overrides))
 
         def rows(self, result):
             return {line.split("\t")[0]: line.split("\t")[1]
@@ -434,7 +434,7 @@ def bench(tmp_path):
 
         def fake(self, name, body="exit 0"):
             """An executable that records its argv, one shell-quoted line per call, so a
-            test can assert what jello asked for without a real binary existing."""
+            test can assert what yelo asked for without a real binary existing."""
             path = binaries / name
             log = binaries / f"{name}.log"
             path.write_text(

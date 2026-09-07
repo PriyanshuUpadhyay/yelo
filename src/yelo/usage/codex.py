@@ -1,7 +1,7 @@
 """Codex rate limits through `codex app-server`.
 
 `usage-hud-codex-fetch` ported as text: the three functions below are the reference's, with
-its `--print-profiles`-style CLI dropped because `jello usage fetch` calls
+its `--print-profiles`-style CLI dropped because `yelo usage fetch` calls
 `fetch_rate_limits` in process (board B6). Codex auth is the codex binary's own business
 through CODEX_HOME; nothing here handles a credential.
 

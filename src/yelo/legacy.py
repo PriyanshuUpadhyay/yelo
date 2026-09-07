@@ -1,4 +1,4 @@
-"""Migrate the old installed shell bridge without a runtime dependency on Jello."""
+"""Migrate the old installed shell bridge without a runtime dependency on Yelo."""
 
 import os
 
@@ -59,4 +59,4 @@ fi
 
 def shell_path(home):
     root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
-    return os.path.join(root, "jello", "shell.sh")
+    return os.path.join(root, "yelo", "shell.sh")

@@ -1,4 +1,4 @@
-"""`jello usage fetch`: refresh every provider's API cache on demand.
+"""`yelo usage fetch`: refresh every provider's API cache on demand.
 
 `usage-hud-fetch` ported into Python. Claude uses Anthropic's OAuth usage endpoint, Codex
 the installed CLI's app-server rate-limit method, so neither provider needs a running agent
@@ -19,7 +19,7 @@ one; and everything a trace prints goes through `redact`, so a body that echoes 
 value back cannot ride out on the trace. USAGE_HUD_FETCH_DEBUG traces stages without token
 bytes or bodies; USAGE_HUD_FETCH_DUMP prints the parsed usage payload only.
 
-CLAUDE_KEYCHAIN_SERVICE and CODEX_BIN retain their override names. JELLO_USAGE_API_URL redirects the endpoint for tests only.
+CLAUDE_KEYCHAIN_SERVICE and CODEX_BIN retain their override names. YELO_USAGE_API_URL redirects the endpoint for tests only.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def debug(message):
 
 
 def api_url():
-    return os.environ.get("JELLO_USAGE_API_URL") or API_URL
+    return os.environ.get("YELO_USAGE_API_URL") or API_URL
 
 
 def codex_bin():

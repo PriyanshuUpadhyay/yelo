@@ -11,7 +11,7 @@ import textwrap
 
 import pytest
 
-from jello.usage import codex
+from yelo.usage import codex
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ def test_normalize_window_refuses_a_non_object():
 
 
 def test_result_is_json(fake_codex, tmp_path):
-    """The whole result is what `jello usage fetch` writes to the codex cache, so it has to
+    """The whole result is what `yelo usage fetch` writes to the codex cache, so it has to
     survive a round trip unchanged."""
     result = codex.fetch_rate_limits(fake_codex(ANSWERS), str(tmp_path), 2)
     assert json.loads(json.dumps(result)) == result

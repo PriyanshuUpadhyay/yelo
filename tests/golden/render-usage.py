@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Render the `usage show` goldens ONCE, the JSON one from the reference script.
 
-`usage-show.json` is the output of the bash+jq data feed jello's snapshot was rewritten
+`usage-show.json` is the output of the bash+jq data feed yelo's snapshot was rewritten
 from, so the rewrite is compared against the thing it replaces rather than against itself.
-`usage-show.txt` is jello's own table: the reference has no human mode (board A1), so that
-one is rendered from jello and reviewed by eye. Run it by hand only:
+`usage-show.txt` is yelo's own table: the reference has no human mode (board A1), so that
+one is rendered from yelo and reviewed by eye. Run it by hand only:
 
     cd /Users/me/work/jello/wt/main
     uv run --with pytest python tests/golden/render-usage.py
@@ -65,11 +65,11 @@ def main():
         environment = usage_env(home)
         environment["PYTHONPATH"] = str(SOURCE)
         table = subprocess.run(
-            [sys.executable, "-m", "jello.cli", "usage", "show"],
+            [sys.executable, "-m", "yelo.cli", "usage", "show"],
             capture_output=True, text=True, env=environment,
         )
         if table.returncode != 0:
-            raise SystemExit(f"jello usage show: exit {table.returncode}: {table.stderr}")
+            raise SystemExit(f"yelo usage show: exit {table.returncode}: {table.stderr}")
         HERE.joinpath("usage-show.txt").write_text(table.stdout)
         print(f"wrote usage-show.txt ({len(table.stdout)} bytes)")
     return 0

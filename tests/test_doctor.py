@@ -1,4 +1,4 @@
-"""C19 and law L4: `jello doctor` reports every verdict and writes nothing.
+"""C19 and law L4: `yelo doctor` reports every verdict and writes nothing.
 
 Two tables live here. The first is one case per setup-step state; the second is matrix M4,
 the `usage` and `hud` rows the cutover moves through. Two properties are asserted on every
@@ -19,9 +19,9 @@ import stat
 import pytest
 
 from conftest import SEEDED_SETTINGS, tree_digest
-from jello import doctor as jello_doctor, hud, setup
+from yelo import doctor as yelo_doctor, hud, setup
 
-HUD_LABEL = "io.github.priyanshuupadhyay.jello-hud"
+HUD_LABEL = "io.github.priyanshuupadhyay.yelo-hud"
 LEGACY_PLIST = "work.example.usage-hud.plist"
 USAGE_LINKS = ("usage-hud-data", "usage-hud-fetch")
 
@@ -159,14 +159,14 @@ def test_doctor_matrix(bench, arrange):
 
 
 def test_doctor_json_matches_the_table(bench):
-    """M4 column 2 end to end: with every target installed by jello, every row is ok."""
+    """M4 column 2 end to end: with every target installed by yelo, every row is ok."""
     assert bench.run("setup").returncode == 0
     install_hud_targets(bench)
     before = bench.digest()
     result = bench.run("doctor", "--json")
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert [row["step"] for row in report] == [step.name for step in jello_doctor.CHECKS]
+    assert [row["step"] for row in report] == [step.name for step in yelo_doctor.CHECKS]
     assert all(row["state"] == "ok" for row in report), report
     assert bench.digest() == before
 
@@ -209,7 +209,7 @@ def link_legacy_agent(bench, root):
     (agents / LEGACY_PLIST).symlink_to(root / "home" / "Library" / "LaunchAgents" / LEGACY_PLIST)
 
 
-# (usage links, legacy agent link, jello plist and bundle) -> (usage, hud), exit code.
+# (usage links, legacy agent link, yelo plist and bundle) -> (usage, hud), exit code.
 M4 = (
     ("before-cutover", True, True, False, ("owned-by-dotfiles", "owned-by-dotfiles"), 0),
     ("both-installed", True, True, True, ("owned-by-dotfiles", "owned-by-dotfiles"), 0),
@@ -219,25 +219,25 @@ M4 = (
 )
 
 
-@pytest.mark.parametrize("name,links,legacy,jello_pair,expected,code", M4,
+@pytest.mark.parametrize("name,links,legacy,yelo_pair,expected,code", M4,
                          ids=[row[0] for row in M4])
-def test_doctor_hud_matrix(bench, name, links, legacy, jello_pair, expected, code):
+def test_doctor_hud_matrix(bench, name, links, legacy, yelo_pair, expected, code):
     """C19 and matrix M4, row by row. The setup steps are installed first so the exit code
     reads off the two HUD rows alone."""
     assert hud.DEFAULT_LABEL == HUD_LABEL, "the label the owner signed"
     root = hud_dotfiles(bench)
-    assert bench.run("setup", JELLO_DOTFILES_ROOT=str(root)).returncode == 0
+    assert bench.run("setup", YELO_DOTFILES_ROOT=str(root)).returncode == 0
     if links:
         link_usage_commands(bench, root)
     if legacy:
         link_legacy_agent(bench, root)
-    if jello_pair:
+    if yelo_pair:
         install_hud_targets(bench)
     # The Herdr, Prime, and agents rows are held at `ok` so the exit code below reads off
     # the two HUD rows alone, which is what this matrix is about.
     before = bench.digest()
 
-    result = bench.run("doctor", JELLO_DOTFILES_ROOT=str(root))
+    result = bench.run("doctor", YELO_DOTFILES_ROOT=str(root))
     rows = verdicts(result)
 
     assert (rows["usage"], rows["hud"]) == expected

@@ -9,7 +9,7 @@ struct APIRefreshTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let executable = directory.appendingPathComponent("jello fixture")
+        let executable = directory.appendingPathComponent("yelo fixture")
         try """
         #!/bin/sh
         printf '%s\\n' "$*" >> "$0.calls"
@@ -23,7 +23,7 @@ struct APIRefreshTests {
         fi
         """.write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let model = UsageModel(environment: ["JELLO_BIN": executable.path,
+        let model = UsageModel(environment: ["YELO_BIN": executable.path,
                                              "USAGE_HUD_FETCH_SCRIPT": "/must-not-run"],
                                historyStore: HistoryStore(directory: directory))
         model.refresh()
@@ -63,7 +63,7 @@ struct APIRefreshTests {
 
     @Test
     func missingExecutableReportsFailure() {
-        #expect(runAPIFetch(executable: "/missing/jello").warning)
+        #expect(runAPIFetch(executable: "/missing/yelo").warning)
     }
 
     @Test

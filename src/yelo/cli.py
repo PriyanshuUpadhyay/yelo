@@ -1,4 +1,4 @@
-"""The Jello CLI: Claude and Codex profiles, usage, and UsageHUD."""
+"""The Yelo CLI: Claude and Codex profiles, usage, and UsageHUD."""
 
 import argparse
 import sys
@@ -12,8 +12,8 @@ GROUPS = (profile_commands, usage_commands, setup, doctor, hud, maintenance)
 
 
 def fail(command, message, path=None):
-    """The one error shape: `jello: <command>: <message> (<path>)`, stderr, exit 1."""
-    text = f"jello: {command}: {message}"
+    """The one error shape: `yelo: <command>: <message> (<path>)`, stderr, exit 1."""
+    text = f"yelo: {command}: {message}"
     if path is not None:
         text = f"{text} ({path})"
     print(text, file=sys.stderr)
@@ -22,9 +22,9 @@ def fail(command, message, path=None):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog="jello", description=__doc__.splitlines()[0]
+        prog="yelo", description=__doc__.splitlines()[0]
     )
-    parser.add_argument("--version", action="version", version=f"jello {__version__}")
+    parser.add_argument("--version", action="version", version=f"yelo {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for module in GROUPS:
         module.register(subparsers)
