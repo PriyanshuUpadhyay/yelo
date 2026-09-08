@@ -16,11 +16,12 @@ def main():
             return error.code
         return 0
     parser = argparse.ArgumentParser(prog="account profiles")
-    parser.add_argument("action", choices=("list", "menu", "resolve", "pick", "sessions"))
+    parser.add_argument("action", choices=("list", "menu", "resolve", "pick", "sessions", "owner"))
     parser.add_argument("--cli", choices=("claude", "codex"), required=True)
     parser.add_argument("--usage", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--all", action="store_true")
+    parser.add_argument("--last", action="store_true")
     parser.add_argument("--limit", type=int, default=core.SESSIONS_LIMIT)
     parser.add_argument("--model")
     parser.add_argument("query", nargs="?")
@@ -31,6 +32,10 @@ def main():
         return core.command_resolve(args)
     if args.action == "sessions":
         return core.command_sessions(args)
+    if args.action == "owner":
+        if args.query is None and not args.last:
+            parser.error("owner requires a session id or --last")
+        return core.command_owner(args)
     usage = None
     if args.usage or args.action in ("menu", "pick"):
         try:

@@ -13,6 +13,8 @@ Subcommands (wired by yelo.profile.commands as `yelo profile ...`):
   pick    --cli claude|codex [--json]             the account about to waste the most usage
   sessions --cli codex [--all] [--limit N] [--json]     recent sessions, newest first, each
                                                         with the account that owns it
+  owner   --cli codex [--json] (SESSION_ID | --last [--all])   name<TAB>dir of the account
+                                                        whose home holds that session
 
 --usage joins the Usage HUD rows, which `yelo.profile.commands` reads in process
 from `yelo.usage.snapshot` and passes in, falling back to each account's own usage
@@ -206,14 +208,18 @@ def codex_rows(*, include_identity=True):
     return rows
 
 
-def rollout_files(directory):
-    """(start time, session id, path) for one home's live rollouts. Archived sessions are left
-    out: `codex resume` cannot reach one until it is unarchived."""
-    pattern = os.path.join(directory, "sessions", "*", "*", "*", "rollout-*.jsonl")
-    for path in glob.glob(pattern):
-        match = ROLLOUT_RE.match(os.path.basename(path))
-        if match:
-            yield match.group(1), match.group(2).lower(), path
+def rollout_files(directory, *, archived=False):
+    """(start time, session id, path) for one home's live rollouts, and its archived ones on
+    request. Listings leave those out: `codex resume` cannot reach one until it is unarchived,
+    and `codex unarchive ID` is what needs to find it."""
+    patterns = [os.path.join(directory, "sessions", "*", "*", "*", "rollout-*.jsonl")]
+    if archived:
+        patterns.append(os.path.join(directory, "archived_sessions", "**", "rollout-*.jsonl"))
+    for pattern in patterns:
+        for path in glob.glob(pattern, recursive=True):
+            match = ROLLOUT_RE.match(os.path.basename(path))
+            if match:
+                yield match.group(1), match.group(2).lower(), path
 
 
 def session_meta(path):
@@ -683,6 +689,37 @@ def command_sessions(args):
         return 1
     for line in render(*session_columns(rows, args.all)):
         print(line)
+    return 0
+
+
+def session_owner(session_id):
+    """The account whose home holds SESSION_ID, live or archived. Filenames carry the id, so
+    no rollout is opened."""
+    wanted = session_id.lower()
+    for profile in codex_rows(include_identity=False):
+        for _, found, _ in rollout_files(profile["dir"], archived=True):
+            if found == wanted:
+                return {"name": profile["name"], "dir": profile["dir"]}
+    return None
+
+
+def command_owner(args):
+    """A session lives in exactly one home, so the codex wrapper runs `resume ID` (or `--last`)
+    there without asking. Same output as resolve."""
+    if args.last:
+        cwd = os.getcwd()
+        rows = codex_session_rows(1, args.all, cwd)
+        row = {"name": rows[0]["profile"], "dir": rows[0]["dir"]} if rows else None
+        if row is None:
+            scope = "any account" if args.all else f"any account for {home_relative(cwd)}"
+            print(f"codex: no sessions found in {scope}", file=sys.stderr)
+            return 1
+    else:
+        row = session_owner(args.query)
+        if row is None:
+            print(f"codex: session {args.query} is not in any account", file=sys.stderr)
+            return 1
+    emit_row(row, args.json)
     return 0
 
 

@@ -64,6 +64,7 @@ yelo profile list --cli codex --usage
 yelo profile resolve --cli claude work
 yelo profile pick --cli codex
 yelo profile sessions --cli codex --all
+yelo profile owner --cli codex SESSION_ID
 yelo doctor
 ```
 
@@ -78,13 +79,15 @@ claude --profile work          # Select a named account
 codex --profile personal
 claude profile list            # List accounts and usage
 codex profile list
-codex --profile personal resume # Resume within this account
+codex resume SESSION_ID        # Resume in the account that owns the session
+codex --profile personal resume # Pick a session within this account
 ```
 
 Automatic selection prefers signed-in accounts with usable capacity that will reset
-soon. An explicitly inherited account stays selected. Commands that manage credentials
-or sessions ask for an account when none is supplied; they do not automatically switch
-accounts. Menus require a terminal. An unknown or ambiguous name is an error, with no
+soon. An explicitly inherited account stays selected. A session id or `--last` selects
+the account that owns the session. Other commands that manage credentials or sessions
+ask for an account when none is supplied; they do not automatically switch accounts.
+Menus require a terminal. An unknown or ambiguous name is an error, with no
 fallback to another account.
 
 The selection score is `fraction of quota remaining / fraction of time remaining`.
@@ -214,7 +217,7 @@ Existing installations of those tools are independent of Yelo.
 
 ```sh
 yelo release
-yelo release --tag v0.5.0
+yelo release --tag v0.5.1
 ```
 
 Run this from a clean, committed checkout. The command creates a versioned source

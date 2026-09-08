@@ -174,6 +174,15 @@ class Sessions(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def run_owner(self, root, cwd, *flags, expect=0):
+        env = os.environ | {"AGENT_PROFILES_CODEX_GLOB_ROOT": str(root)}
+        result = subprocess.run(
+            YELO + ["owner", "--cli", "codex", "--json", *flags],
+            capture_output=True, text=True, env=env, cwd=cwd,
+        )
+        self.assertEqual(result.returncode, expect, result.stderr)
+        return json.loads(result.stdout) if expect == 0 else result.stderr
+
     def build(self, tmp):
         root = pathlib.Path(tmp)
         root.joinpath(".codex").mkdir()
@@ -215,6 +224,29 @@ class Sessions(unittest.TestCase):
             rows = self.run_sessions(root, work, "--limit", "2", "--all")
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0]["started"], "2026-08-03T09-00-00")
+
+    def test_owner_is_the_home_holding_the_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, work = self.build(tmp)
+            self.rollout(root, ".codex", "2026-08-01T09-00-00",
+                         "019e08eb-508e-7e73-8bc3-1e9c69b5dfd3", work)
+            self.rollout(root, ".codex-other", "2026-08-02T09-00-00",
+                         "019e08eb-4c3f-7610-b2f9-c7b4a062e1ee", str(root / "elsewhere"))
+            archived = root / ".codex-other" / "archived_sessions"
+            archived.mkdir()
+            archived.joinpath(
+                "rollout-2026-07-01T09-00-00-019e08eb-4d19-7181-b8c8-ed0f8584a1ea.jsonl"
+            ).write_text("")
+            owner = self.run_owner(root, work, "019E08EB-4C3F-7610-B2F9-C7B4A062E1EE")
+            self.assertEqual((owner["name"], owner["dir"]), ("other", str(root / ".codex-other")))
+            self.assertEqual(self.run_owner(root, work, "019e08eb-4d19-7181-b8c8-ed0f8584a1ea")["name"],
+                             "other")
+            self.assertEqual(self.run_owner(root, work, "--last")["name"], "base")
+            self.assertEqual(self.run_owner(root, work, "--last", "--all")["name"], "other")
+            self.assertIn("is not in any account",
+                          self.run_owner(root, work, "019e08eb-0000-7000-8000-000000000000", expect=1))
+            self.assertIn("no sessions found",
+                          self.run_owner(root, tmp, "--last", expect=1))
 
     def test_non_meta_first_line_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:

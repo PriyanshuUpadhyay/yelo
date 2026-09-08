@@ -162,6 +162,19 @@ def test_bound_commands_cannot_auto_switch_in_a_pipe(installed, command):
     assert not result.stdout
 
 
+def test_named_session_runs_in_the_account_that_owns_it(installed):
+    home, _, _, _ = installed
+    session = "019e08eb-508e-7e73-8bc3-1e9c69b5dfd3"  # the rollout build_usage_home puts in alt
+    result = run(installed, f"codex -C /tmp resume {session} 'carry on'")
+    assert result.returncode == 23, result.stderr
+    assert "home=" + str(home / ".codex-alt") in result.stdout
+    assert f"arg=-C\narg=/tmp\narg=resume\narg={session}\narg=carry on" in result.stdout
+    assert "owns the session" in result.stderr
+    result = run(installed, "codex resume 019e08eb-0000-7000-8000-000000000000")
+    assert result.returncode == 2
+    assert not result.stdout
+
+
 @pytest.mark.parametrize("cli", ["claude", "codex"])
 def test_help_passes_through_without_account_selection(installed, cli):
     result = run(installed, cli + " --help")

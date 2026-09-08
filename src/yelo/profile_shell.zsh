@@ -298,6 +298,33 @@ _codex_subcommand() {
   done
 }
 
+# The session a `resume`/`fork`/`archive`/`unarchive`/`delete` names — the second positional
+# when it is a UUID, or `--last` — resolved to the account whose home holds it, in the resolve
+# format. Empty output with success means nothing was named, so the caller has to ask. Options
+# are skipped the way _codex_subcommand skips them; a session *name* is left to Codex.
+_codex_session_owner() {
+  local x positional=0 session= last= all=
+  while [ "$#" -gt 0 ]; do
+    x="$1"; shift
+    case "$x" in
+      --) break ;;
+      --last) last=1 ;;
+      --all) all=1 ;;
+      -c|--config|-i|--image|-m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|\
+      -C|--cd|--add-dir|--enable|--disable|--remote|--remote-auth-token-env|--local-provider)
+        shift 2>/dev/null || break
+        ;;
+      -*) ;;
+      *) (( ++positional == 2 )) && session="$x" ;;
+    esac
+  done
+  if [[ "$session" =~ '^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$' ]]; then
+    _yelo_profiles owner --cli codex -- "$session"
+  elif [[ -n "$last" ]]; then
+    _yelo_profiles owner --cli codex ${all:+--all} --last
+  fi
+}
+
 # The wrapper shadows the binary's own name, so the lookup has to search PATH only:
 # `command -v codex` would answer with this function and the fallback could never be
 # reached. `whence -p` is that PATH-only lookup.
@@ -347,9 +374,10 @@ function codex {
   # Which account this invocation belongs to. An explicit --profile always wins and always
   # exports the home, base included; a valueless --profile means "let me choose". Without the
   # flag a session-starting run auto-picks the account about to waste the most usage — nothing
-  # silently lands on the base account any more. Account-bound subcommands never auto-pick:
-  # they read or write sessions and credentials that belong to one home. Plumbing subcommands
-  # keep running on the binary's own default home. A caller-set CODEX_HOME stays untouched.
+  # silently lands on the base account any more. Account-bound subcommands read or write
+  # sessions and credentials that belong to one home: a session named on the command line
+  # selects the home that holds it, and everything else asks. Plumbing subcommands keep
+  # running on the binary's own default home. A caller-set CODEX_HOME stays untouched.
   local resolved="" autopick="" subcommand=""
   subcommand="$(_codex_subcommand "${args[@]}")"
   if [[ -n "$profile" ]]; then
@@ -361,18 +389,23 @@ function codex {
     case "$subcommand" in
       --help|-h|--version|-V|mcp|app-server|completion|debug|cloud|features|apply|update|doctor|remote-control|exec-server) ;;
       login|logout|resume|fork|archive|unarchive|delete)
-        [[ -t 0 && -t 1 ]] || {
-          print -u2 "codex: $subcommand needs --profile NAME; run 'codex profile list' to see accounts"
-          return 2
-        }
-        resolved="$(_yelo_profile_pick codex)" || return 2
+        resolved="$(_codex_session_owner "${args[@]}")" || return 2
+        if [[ -n "$resolved" ]]; then
+          autopick="owns the session; --profile overrides"
+        else
+          [[ -t 0 && -t 1 ]] || {
+            print -u2 "codex: $subcommand needs --profile NAME; run 'codex profile list' to see accounts"
+            return 2
+          }
+          resolved="$(_yelo_profile_pick codex)" || return 2
+        fi
         ;;
       *)
         resolved="$(_yelo_profiles pick --cli codex)" || {
           print -u2 "codex: no account could be picked; pass --profile NAME"
           return 2
         }
-        autopick=1
+        autopick="expiring usage first; --profile overrides"
         ;;
     esac
   fi
@@ -383,7 +416,7 @@ function codex {
     local -a fields=("${(@ps:\t:)resolved}")
     profile_name="${fields[1]}"; profile_dir="${fields[2]}"
     local -x CODEX_HOME="$profile_dir" CODEX_CONFIG_PATH="$profile_dir/config.toml"
-    [[ -n "$autopick" ]] && print -u2 "codex: using profile '${profile_name:-${profile_dir:t}}' (expiring usage first; --profile overrides)"
+    [[ -n "$autopick" ]] && print -u2 "codex: using profile '${profile_name:-${profile_dir:t}}' ($autopick)"
   fi
 
   # Launch policy belongs to the host, not to yelo: the Herdr checks and the Codex config
