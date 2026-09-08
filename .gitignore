@@ -15,4 +15,6 @@ apps/UsageHUD/.build/
 uv.lock
 
 # Local files from the former Herdr install; live scripts still link here.
-/assets
+/assets/*
+!/assets/bin
+!/assets/claude

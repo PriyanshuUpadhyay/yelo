@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$HOME/.claude/scripts/herdr-bus.py" "$@"
