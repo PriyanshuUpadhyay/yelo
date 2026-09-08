@@ -162,6 +162,7 @@ final class UsageModel: ObservableObject {
                 case .success(let rows):
                     let now = Date()
                     self.rows = rows
+                    self.apiFetchResult = self.apiFetchResult.flatMap { supersededFetchResult($0, rows: rows) }
                     self.lastFetchAt = oldestDataDate(in: rows)
                     self.lastSnapshotAt = now
                     self.fetchFailed = false
@@ -227,6 +228,21 @@ struct APIFetchResult {
     let warning: Bool
     /// Per-account outcome word, keyed by the same `cl·NAME` / `cx·NAME` labels the rows carry.
     var statuses: [String: String] = [:]
+    /// When the fetch finished. A row confirmed later outranks this verdict for its account.
+    var at: Date = Date()
+}
+
+/// Drop the verdict for every account with a row confirmed AFTER the fetch: its launcher renewed
+/// the token or a live session wrote a cache, so an `auth-stale` or `fetch-failed` mark must not
+/// wait for the next manual Refresh. A warning with no failure left to explain goes entirely.
+func supersededFetchResult(_ result: APIFetchResult, rows: [MeterRow]) -> APIFetchResult? {
+    let fetchedAt = result.at.timeIntervalSince1970
+    let confirmedLater = Set(rows.filter { ($0.seenAt ?? 0) > fetchedAt }.map(\.label))
+    var trimmed = result
+    trimmed.statuses = result.statuses.filter { !confirmedLater.contains($0.key) }
+    if trimmed.statuses.count == result.statuses.count { return result }
+    let failing = trimmed.statuses.values.contains { $0 != "ok" }
+    return result.warning && !failing ? nil : trimmed
 }
 
 /// The CLI exits zero when at least one account succeeds. Check every status before claiming success.
@@ -248,7 +264,7 @@ func apiFetchSummary(_ output: String, exitCode: Int32) -> APIFetchResult {
     }
     if words.contains("auth-stale") {
         return APIFetchResult(
-            message: "Updated \(updated) of \(words.count) accounts. Sign in to marked accounts with their launchers.",
+            message: "Updated \(updated) of \(words.count) accounts. Open each marked account's launcher to renew its token.",
             warning: true, statuses: statuses)
     }
     if words.allSatisfy({ $0 == "ok" || $0 == "fable-write-failed" }) {

@@ -98,7 +98,7 @@ func freshnessDetail(_ row: MeterRow, now: Date = Date()) -> String? {
 func accountSubtitle(_ rows: [MeterRow], fetchStatus: String?, now: Date = Date()) -> (text: String, warning: Bool) {
     let age = rows.compactMap(\.seenAt).min().map { ageLabel(since: Date(timeIntervalSince1970: $0), now: now) }
     if fetchStatus == "fetch-failed" { return ("Fetch failed" + (age.map { " · \($0)" } ?? ""), true) }
-    if fetchStatus == "auth-stale" { return ("Sign in needed" + (age.map { " · \($0)" } ?? ""), true) }
+    if fetchStatus == "auth-stale" { return ("Token expired" + (age.map { " · \($0)" } ?? ""), true) }
     let parts = [age, rows.contains { $0.active == true } ? "last used" : nil].compactMap { $0 }
     return (parts.joined(separator: " · "), false)
 }

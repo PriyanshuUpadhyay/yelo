@@ -51,6 +51,21 @@ struct APIRefreshTests {
         #expect(apiFetchSummary(output, exitCode: status).warning == warning)
     }
 
+    /// A row confirmed after the fetch outranks the fetch's verdict for that account, so a
+    /// launcher that renewed the token clears the mark without another Refresh.
+    @Test
+    func laterSampleSupersedesAccountVerdict() {
+        var result = apiFetchSummary("cl·a: auth-stale\ncl·b: ok\n", exitCode: 0)
+        result.at = Date(timeIntervalSince1970: 1_000)
+        func row(_ label: String, seenAt: Double) -> MeterRow {
+            MeterRow(label: label, provider: "claude", window: "5h", pct: 1, reset: "1h", state: "ok",
+                     reason: nil, asOf: seenAt, seenAt: seenAt, active: nil, source: "statusline", canFetch: true)
+        }
+        #expect(supersededFetchResult(result, rows: [row("cl·a", seenAt: 900)])?.statuses["cl·a"] == "auth-stale")
+        #expect(supersededFetchResult(result, rows: [row("cl·b", seenAt: 1_100)])?.statuses["cl·a"] == "auth-stale")
+        #expect(supersededFetchResult(result, rows: [row("cl·a", seenAt: 1_100)]) == nil)
+    }
+
     /// The footer count and the rows must name the same accounts, so the summary carries the
     /// per-account word keyed by the label the rows already use.
     @Test

@@ -7,9 +7,10 @@ session to report current limits.
 For each Claude profile: read the profile's OAuth access token from the Keychain, GET the
 usage endpoint, and on a fully valid response atomically rewrite that profile's
 `.usage-api-cache.json` (and the Fable weekly window into `.usage-api-cache-fable.json`
-when the payload exposes it). 401 or 403 reports `auth-stale`; the person signs in
-through the named Claude launcher. Reading usage never starts an agent, runs hooks,
-or loads MCP integrations. Exit 0 unless every account failed.
+when the payload exposes it). 401 or 403 reports `auth-stale`: the stored access token
+has expired (an unused account's does within hours) and the named Claude launcher renews
+it on its next start; no sign-in is needed unless the launcher asks for one. Reading usage
+never starts an agent, runs hooks, or loads MCP integrations. Exit 0 unless every account failed.
 
 The token NEVER leaves memory (law L1): it lives in one local in `fetch_claude`, goes into
 the request header, and is never formatted into a message, a log line, an exception, or a

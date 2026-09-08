@@ -130,7 +130,7 @@ final class AccountSubtitleTests: XCTestCase {
                              state: "missing", reason: nil, asOf: nil,
                              active: false, source: "api", canFetch: true)]
         let subtitle = accountSubtitle(rows, fetchStatus: "auth-stale", now: Date(timeIntervalSince1970: now))
-        XCTAssertEqual(subtitle.text, "Sign in needed")
+        XCTAssertEqual(subtitle.text, "Token expired")
         XCTAssertTrue(subtitle.warning)
     }
 }
