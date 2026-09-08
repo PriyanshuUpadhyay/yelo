@@ -45,6 +45,8 @@ FIXTURE_ROUTES = {
         "agy": {"provider": "agy", "model": "gemini-3-pro", "effort": "high"},
     },
     "review.deep": {"claude": {"provider": "claude", "model": "opus", "effort": "high"}},
+    "code.complex": {"codex": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                               "sandbox": "workspace-write", "approval": "never"}},
     # A second claude seat, routed somewhere else on purpose: it is how a test tells which
     # of the three sources the spawn actually took its role from.
     "code.light": {"claude": {"provider": "claude", "model": "sonnet", "effort": "low"}},
@@ -2762,8 +2764,8 @@ class SeatResolutionTest(unittest.TestCase):
             registry.spawn_role("claude", "review.deep", "code.routine"), "review.deep")
         self.assertEqual(
             registry.spawn_role("claude", registry.DEFAULT_ROLE, "review.deep"), "review.deep")
-        self.assertEqual(registry.spawn_role("claude", "  ", None), "code.routine")
-        self.assertEqual(registry.spawn_role("codex", None, None), "code.routine")
+        self.assertEqual(registry.spawn_role("claude", "  ", None), "review.deep")
+        self.assertEqual(registry.spawn_role("codex", None, None), "code.complex")
         self.assertEqual(registry.spawn_role("agy", None, None), "code.routine")
         self.assertEqual(registry.spawn_role("agy", None, "review.deep"), "review.deep")
 

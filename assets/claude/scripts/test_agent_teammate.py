@@ -353,7 +353,8 @@ class AccountEnvTest(unittest.TestCase):
 
 
 class RoleRoutingTest(unittest.TestCase):
-    def route(self, payload, provider="claude", agent_args=None, commands=None):
+    def route(self, payload, provider="claude", agent_args=None, commands=None,
+              role="code.routine"):
         original = teammate.run
 
         def run(command):
@@ -363,7 +364,7 @@ class RoleRoutingTest(unittest.TestCase):
 
         teammate.run = run
         try:
-            return teammate.resolve_role("code.routine", provider, list(agent_args or []))
+            return teammate.resolve_role(role, provider, list(agent_args or []))
         finally:
             teammate.run = original
 
@@ -380,11 +381,18 @@ class RoleRoutingTest(unittest.TestCase):
                    provider="cloud", commands=commands)
         self.assertEqual(commands[0][1:], ["get", "code.routine", "--provider", "claude"])
 
-    def test_a_fable_runner_is_never_a_child(self):
+    def test_a_fable_runner_is_refused_for_a_coding_role(self):
         """Second, independent check: the router refuses Fable at validate time, and a
-        config edited past it must still not reach a pane."""
-        with self.assertRaisesRegex(RuntimeError, "Fable is never a child"):
-            self.route({"provider": "claude", "model": "claude-fable-5-1", "effort": "high"})
+        config edited past it must still not reach a pane for a coding role."""
+        with self.assertRaisesRegex(RuntimeError, "Fable is a child only for"):
+            self.route({"provider": "claude", "model": "claude-fable-5-1", "effort": "high"},
+                       role="code.routine")
+
+    def test_a_fable_runner_is_allowed_for_a_review_role(self):
+        route, args = self.route(
+            {"provider": "claude", "model": "claude-fable-5-1", "effort": "high"},
+            role="review.deep")
+        self.assertEqual(args, ["--model", "claude-fable-5-1", "--effort", "high"])
 
     def test_claude_role_applies_model_and_effort(self):
         route, args = self.route({

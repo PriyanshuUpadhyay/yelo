@@ -396,8 +396,11 @@ def resolve_role(role, provider, agent_args):
     effort = route.get("effort")
     # The router already refuses a Fable runner at validate time; this is the second,
     # independent check, so a config edited past the router still cannot reach a pane.
-    if model and re.search(r"fable", model, re.IGNORECASE):
-        raise RuntimeError(f"Fable is never a child (role {role} resolved to {model})")
+    if (model and re.search(r"fable", model, re.IGNORECASE)
+            and not role.startswith(("review.", "council."))):
+        raise RuntimeError(
+            f"Fable is a child only for review.* and council.* (role {role} resolved to {model})"
+        )
     flags = []
     if canonical_provider == "claude":
         if not model or not effort:

@@ -239,7 +239,7 @@ DEFAULT_ROLE = "worker"
 # required `--role` since dotfiles dd804cc, and the role IS the launch policy (ADR 0009):
 # the host picks it, never the sandboxed requester, which is also why `--model` in a
 # request cannot survive beside one. A family with no entry here has to be told a role.
-FAMILY_ROLES = {"claude": "code.routine", "codex": "code.routine", "agy": "code.routine"}
+FAMILY_ROLES = {"claude": "review.deep", "codex": "code.complex", "agy": "code.routine"}
 
 # Storage and attention budgets: a requester that can rename into `requests/` can
 # otherwise mint unbounded queue entries, directory entries and per-pass stat() work.
