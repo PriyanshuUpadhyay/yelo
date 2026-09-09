@@ -13,7 +13,7 @@ shared by the chair and every pane, and the collector needs an `AF_UNIX` herdr s
 Remote panes and the Windows named-pipe transport are out of scope; both fail loudly.
 
 Subcommands: `publish` (worker side), `dispatch` / `verify` / `collect` / `prompt` /
-`pending` / `digest` (chair side).
+`close` / `pending` / `digest` (chair side).
 """
 
 # Workers run `publish` with whatever `python3` their pane shell resolves — /usr/bin/python3
@@ -31,11 +31,13 @@ import json
 import os
 import re
 import select
-import shlex
 import socket
+import sqlite3
+import subprocess
 import sys
 import threading
 import time
+import uuid
 
 
 SCHEMA_VERSION = 1
@@ -61,12 +63,22 @@ CHECKPOINT_DIR = "checkpoints"
 # Breadcrumbs for seats this run left live, under the bus root rather than a run
 # dir: the stop gate asks about the session, not about one run it would have to find.
 PENDING_DIR = "pending"
+DISPATCH_DIR = "dispatch"
 IDENTITY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 HELPER = os.path.abspath(__file__)
 HERDR_BUS = os.path.join(os.path.dirname(HELPER), "herdr-bus.py")
-PUBLISH_COMMAND = os.environ.get("AGENT_HANDOFF_COMMAND", "agent-handoff")
-BUS_COMMAND = os.environ.get("HERDR_BUS_COMMAND", "herdr-bus")
+PUBLISH_COMMAND = os.environ.get(
+    "AGENT_HANDOFF_COMMAND", "python3 ~/.claude/scripts/agent-handoff.py"
+)
+WORKER_HISTORY_CLASSIFIER = os.path.expanduser(
+    "~/.claude/hooks/worker-history-classifier.py"
+)
+CLAUDE_WORKER_SESSION_PREFIX = "aaaaaaaa-"
+CODEX_BINARY = "/opt/homebrew/bin/codex"
+CODEX_ARCHIVE_SECONDS = 3.0
+TEARDOWN_SECONDS = 10.0
+TEARDOWN_POLL_SECONDS = 0.5
 
 COMPLETED = "completed"
 DECLARED_BLOCKED = "declared_blocked"
@@ -502,6 +514,9 @@ class Reply:
     occupant: str | None = None
     kind: str | None = None
     ready: bool | None = None
+    session_id: str | None = None
+    cwd: str | None = None
+    pane_id: str | None = None
 
 
 class SocketTransport:
@@ -547,6 +562,19 @@ class SocketTransport:
         if code:
             return None
         return ((result or {}).get("process_info") or {}).get("foreground_process_group_id")
+
+    def close_pane(self, pane_id):
+        code, _result = self._call("pane.close", {"pane_id": pane_id},
+                                   self._budget_ms(5000))
+        return code
+
+    def agent_present(self, target):
+        code, result = self._call("agent.list", {}, self._budget_ms(5000))
+        if code:
+            return None, code
+        agents = (result or {}).get("agents") or []
+        return any(isinstance(agent, dict) and agent.get("name") == target
+                   for agent in agents), None
 
     def cancel_all(self):
         """Reap every owned wait — the chair, not a detached shell, owns these.
@@ -804,7 +832,116 @@ def _reply(code, result):
         f"{agent.get('pane_id')}:session:{session}" if session else None,
         agent.get("agent"),
         agent.get("interactive_ready"),
+        session,
+        agent.get("cwd"),
+        agent.get("pane_id"),
     )
+
+
+def _claude_history_roots():
+    roots = [os.environ.get("CLAUDE_PROFILE_DIR"), os.path.expanduser("~/.claude")]
+    profiles = os.path.expanduser("~/.claude/.profiles")
+    try:
+        roots.extend(entry.path for entry in os.scandir(profiles) if entry.is_dir())
+    except OSError:
+        pass
+    return tuple(dict.fromkeys(os.path.realpath(root) for root in roots if root))
+
+
+def _run_claude_classifier(transcript, session_id, projects_root):
+    environment = dict(os.environ)
+    environment["HERDR_AGENT_PANE"] = "1"
+    result = subprocess.run(
+        [WORKER_HISTORY_CLASSIFIER, "--provider", "claude", "--root", projects_root],
+        input=json.dumps({"session_id": session_id, "transcript_path": transcript}),
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env=environment,
+    )
+    if result.returncode != 0 or result.stderr.strip():
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "classifier failed")
+
+
+def hide_claude_worker(reply, sleeper=time.sleep):
+    if (reply.kind != "claude" or not isinstance(reply.session_id, str)
+            or not reply.session_id.startswith(CLAUDE_WORKER_SESSION_PREFIX)
+            or not isinstance(reply.cwd, str) or not reply.cwd):
+        return
+    project = re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(reply.cwd))
+    candidates = [
+        (os.path.join(root, "projects"),
+         os.path.join(root, "projects", project, reply.session_id + ".jsonl"))
+        for root in _claude_history_roots()
+    ]
+    try:
+        for attempt in range(2):
+            for projects_root, transcript in candidates:
+                if os.path.isfile(transcript):
+                    _run_claude_classifier(transcript, reply.session_id, projects_root)
+                    return
+            if attempt == 0:
+                # ponytail: one 200 ms retry; use a write event if Claude moves later.
+                sleeper(0.2)
+        raise FileNotFoundError("transcript did not appear after uptake")
+    except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+        print(f"agent-handoff: could not hide Claude worker {reply.session_id} ({error})",
+              file=sys.stderr)
+
+
+def _codex_home(session_id):
+    home = os.path.expanduser("~")
+    try:
+        profiles = [entry.path for entry in os.scandir(home)
+                    if entry.is_dir() and (entry.name == ".codex"
+                                           or entry.name.startswith(".codex-"))]
+    except OSError:
+        return None
+    for profile in sorted(profiles):
+        try:
+            databases = sorted(
+                (entry for entry in os.scandir(profile)
+                 if entry.is_file() and entry.name.startswith("state_")
+                 and entry.name.endswith(".sqlite")),
+                key=lambda entry: entry.stat().st_mtime,
+                reverse=True,
+            )
+            if not databases:
+                continue
+            connection = sqlite3.connect(f"file:{databases[0].path}?mode=ro", uri=True)
+            try:
+                if connection.execute(
+                        "SELECT 1 FROM threads WHERE id = ?", (session_id,)).fetchone():
+                    return os.path.realpath(profile)
+            finally:
+                connection.close()
+        except (OSError, sqlite3.Error):
+            continue
+    return None
+
+
+def _pending_identity(reply):
+    if not reply or not reply.ok:
+        return {}
+    identity = {"kind": reply.kind, "agent_session": reply.session_id}
+    if reply.kind == "codex" and reply.session_id:
+        identity["codex_home"] = _codex_home(reply.session_id)
+    return {key: value for key, value in identity.items() if value}
+
+
+def _poll_agent_identity(transport, target, reply=None, sleeper=time.sleep):
+    """Wait briefly for Herdr's asynchronous Codex session detection."""
+    reply = reply or transport.get(target)
+    if not reply.ok or reply.kind != "codex" or reply.session_id:
+        return reply
+    deadline = time.monotonic() + TEARDOWN_SECONDS
+    while time.monotonic() < deadline:
+        sleeper(min(TEARDOWN_POLL_SECONDS, max(deadline - time.monotonic(), 0)))
+        reply = transport.get(target)
+        if not reply.ok or reply.kind != "codex" or reply.session_id:
+            return reply
+    return reply
 
 
 def cross_sandbox_roots():
@@ -907,12 +1044,19 @@ class Collector:
         waited, never in what they leave behind (ORCH-02/ORCH-03).
         """
         for record in report["seats"]:
-            if record["state"] in (COMPLETED, DECLARED_BLOCKED, DECLARED_FAILED):
+            identity = {
+                key: record[key]
+                for key in ("kind", "agent_session", "codex_home")
+                if record.get(key)
+            }
+            if (record.get("kind") != "codex"
+                    and record["state"] in (COMPLETED, DECLARED_BLOCKED, DECLARED_FAILED)):
                 clear_pending(record["seat_id"])
-            else:
-                mark_pending(record["seat_id"], via=report["mode"], state=record["state"],
-                             run_id=self.run_id, workflow=self.workflow,
-                             round=self.round_id, run_dir=self.run_dir)
+                continue
+            mark_pending(record["seat_id"], via=report["mode"], state=record["state"],
+                         run_id=self.run_id, workflow=self.workflow,
+                         round=self.round_id, run_dir=self.run_dir,
+                         parent=os.environ.get("HERDR_PANE_ID"), **identity)
 
     def _check_run_dir_reachable(self, seats):
         """Refuse a run dir no sandboxed seat could publish into, before any side effect.
@@ -1086,6 +1230,7 @@ class Collector:
                 return
             record["last_status"] = info.status
             record["kind"] = info.kind
+            record.update(_pending_identity(info))
             pinned = _occupant_verdict(self.transport, record["occupant"], info.occupant)
             if pinned in (OCCUPANT_UNVERIFIABLE, OCCUPANT_CHANGED):
                 record["occupant_verdict"] = pinned
@@ -1123,6 +1268,9 @@ class Collector:
                 return
             if record["attempts"]:
                 if not self._may_redispatch(seat, record, info):
+                    if record.get("kind") == "codex" and not record.get("agent_session"):
+                        record.update(_pending_identity(
+                            _poll_agent_identity(self.transport, seat.target, info)))
                     return
                 # The retry gate slept out the grace interval; the artifact may have
                 # landed inside it, and a retry then would duplicate finished work.
@@ -1134,6 +1282,11 @@ class Collector:
             # Recorded BEFORE the prompt: a chair that dies mid-dispatch must still be
             # able to accept what this attempt publishes.
             checkpoint.record_dispatch(state, attempt, info.occupant)
+            write_dispatch_record(
+                seat.target, seat_id=seat.seat_id, run_id=self.run_id, workflow=self.workflow,
+                round_id=self.round_id, attempt=attempt,
+                input_digest=seat.input_digest, run_dir=self.run_dir,
+            )
             reply = self.transport.prompt(
                 seat.target, self._dispatch_text(seat, attempt), UPTAKE_STATES,
                 min(self._remaining_ms(), UPTAKE_TIMEOUT_MS),
@@ -1142,6 +1295,7 @@ class Collector:
             if stalled:
                 record["state"] = PROMPT_STALLED
             landed = self.transport.get(seat.target)
+            record.update(_pending_identity(landed))
             churn = _occupant_verdict(self.transport, info.occupant, landed.occupant) \
                 if landed.ok else OCCUPANT_UNVERIFIABLE
             if churn != OCCUPANT_SAME:
@@ -1151,6 +1305,8 @@ class Collector:
             # reply carried must survive that deferral to be applied once identity holds.
             blocked_seen = blocked_seen or _blocked_seen(reply, landed)
             decision = classify_post_prompt(reply, churn, landed)
+            if decision in (POST_PROMPT_BLOCKED, POST_PROMPT_OPEN):
+                hide_claude_worker(landed)
             if decision == POST_PROMPT_INDETERMINATE:
                 record["transport_error"] = reply.code
             if self._scan_accept(seat, record, checkpoint, state):
@@ -1189,6 +1345,9 @@ class Collector:
                     and (reply.ok or landed.status == "working"):
                 record["state"] = DISPATCHED
                 record["uptake_status"] = reply.status or landed.status
+                if record.get("kind") == "codex" and not record.get("agent_session"):
+                    record.update(_pending_identity(
+                        _poll_agent_identity(self.transport, seat.target, landed)))
                 return
             # `unverifiable` and `open` both fall through. This is the ONE place the two
             # paths intentionally differ: a collector can loop, so it revalidates identity
@@ -1287,6 +1446,56 @@ def _pending_dir(bus):
     return path
 
 
+def _dispatch_record_path(bus, seat_id):
+    directory = os.path.join(
+        os.path.realpath(os.path.abspath(os.path.expanduser(bus.bus_dirs()["root"]))),
+        DISPATCH_DIR,
+    )
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    return os.path.join(directory, check_identity("seat id", seat_id) + ".json")
+
+
+def write_dispatch_record(target, *, seat_id, run_id, workflow, round_id, attempt,
+                          input_digest, run_dir):
+    bus = _load_bus("not recording dispatch identity")
+    if bus is None:
+        raise RuntimeError("HERDR_BUS_DIR is missing; cannot record dispatch identity")
+    path = _dispatch_record_path(bus, target)
+    temp = f"{path}.{os.getpid()}.{next(_TEMP_SEQUENCE)}.tmp"
+    record = {
+        "seat_id": seat_id,
+        "run_id": run_id,
+        "workflow": workflow,
+        "round": round_id,
+        "attempt": attempt,
+        "input_digest": input_digest,
+        "run_dir": run_dir,
+        "recorded_at": time.time(),
+    }
+    try:
+        _write_durably(temp, json.dumps(record, indent=2, sort_keys=True) + "\n")
+        os.replace(temp, path)
+    finally:
+        try:
+            os.unlink(temp)
+        except FileNotFoundError:
+            pass
+    _fsync_directory(os.path.dirname(path))
+    return path
+
+
+def next_manual_attempt(bus, seat_id):
+    path = _dispatch_record_path(bus, seat_id)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            attempt = json.load(handle).get("attempt")
+    except FileNotFoundError:
+        return 1
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        raise ValueError(f"dispatch record {path} has an invalid attempt")
+    return attempt + 1
+
+
 def mark_pending(seat_id, **fields):
     """Record that this process is returning while `seat_id` is still live.
 
@@ -1313,24 +1522,158 @@ def mark_pending(seat_id, **fields):
         return None
 
 
-def clear_pending(seat_id):
-    """Drop a seat's breadcrumb; never recorded and already cleared are the same answer."""
+def clear_pending(seat_id, force=False):
+    """Drop a breadcrumb, but keep Codex identity until teardown archives it."""
     bus = _load_bus("not clearing a pending seat")
     if bus is None:
         return
     try:
-        os.unlink(os.path.join(_pending_dir(bus), bus.sanitize(seat_id) + ".json"))
+        path = os.path.join(_pending_dir(bus), bus.sanitize(seat_id) + ".json")
+        if not force:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    if json.load(handle).get("kind") == "codex":
+                        return
+            except (OSError, ValueError):
+                pass
+        os.unlink(path)
     except (Exception, SystemExit):
         pass
+
+
+def _archive_pending_codex(record, runner=subprocess.run, sleeper=time.sleep):
+    if record.get("kind") != "codex":
+        return True
+    session_id = record.get("agent_session")
+    codex_home = record.get("codex_home")
+    if not isinstance(session_id, str) or not isinstance(codex_home, str):
+        return False
+    try:
+        if str(uuid.UUID(session_id)) != session_id:
+            return False
+    except ValueError:
+        return False
+    codex_home = os.path.realpath(codex_home)
+    if _codex_home(session_id) != codex_home:
+        return False
+    environment = dict(os.environ)
+    environment.update(
+        CODEX_HOME=codex_home,
+        CODEX_CONFIG_PATH=os.path.join(codex_home, "config.toml"),
+    )
+    deadline = time.monotonic() + CODEX_ARCHIVE_SECONDS
+    while True:
+        try:
+            result = runner(
+                [CODEX_BINARY, "archive", session_id],
+                capture_output=True,
+                text=True,
+                timeout=max(min(deadline - time.monotonic(), 1.0), 0.1),
+                check=False,
+                env=environment,
+            )
+            if result.returncode == 0:
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        sleeper(0.2)
+
+
+def teardown_pending(seat_id):
+    """Hide a closed Codex seat, then drop its breadcrumb."""
+    bus = _load_bus("not clearing a pending seat")
+    if bus is None:
+        return False
+    path = os.path.join(_pending_dir(bus), bus.sanitize(seat_id) + ".json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            record = json.load(handle)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    if not _archive_pending_codex(record):
+        print(f"agent-handoff: could not hide Codex worker for pending seat {seat_id!r}",
+              file=sys.stderr)
+        return False
+    clear_pending(seat_id, force=True)
+    return True
+
+
+def _keep_teardown_failure(seat_id, record, reason):
+    fields = {key: value for key, value in record.items()
+              if key not in ("seat_id", "recorded_at")}
+    fields["teardown_failed"] = reason
+    mark_pending(seat_id, **fields)
+    print(f"agent-handoff: could not close pending seat {seat_id!r} ({reason})",
+          file=sys.stderr)
+    return reason
+
+
+def close_pending(seat_id, transport=None, sleeper=time.sleep):
+    """Record a live seat's identity, close its pane, then archive and clear it."""
+    bus = _load_bus("not closing a pending seat")
+    if bus is None:
+        return "pending_store_unavailable"
+    path = os.path.join(_pending_dir(bus), bus.sanitize(seat_id) + ".json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            record = json.load(handle)
+    except FileNotFoundError:
+        record = {"via": "close", "state": "teardown"}
+    except (OSError, ValueError) as error:
+        return _keep_teardown_failure(seat_id, {}, f"pending_record:{error}")
+
+    transport = transport or SocketTransport()
+    reply = _poll_agent_identity(transport, seat_id, sleeper=sleeper)
+    if not reply.ok:
+        return _keep_teardown_failure(seat_id, record,
+                                      f"agent_get:{reply.code or 'unknown'}")
+    identity = _pending_identity(reply)
+    pane_id = reply.pane_id
+    if reply.kind == "codex" and not reply.session_id:
+        return _keep_teardown_failure(seat_id, record, "agent_session_timeout")
+    if reply.kind == "codex" and not identity.get("codex_home"):
+        return _keep_teardown_failure(seat_id, record, "codex_home_not_found")
+    if not pane_id:
+        return _keep_teardown_failure(seat_id, record, "pane_not_found")
+    if pane_id == os.environ.get("HERDR_PANE_ID"):
+        return _keep_teardown_failure(seat_id, record, "refusing_parent_pane")
+
+    record.update(identity, pane=pane_id)
+    record.pop("teardown_failed", None)
+    fields = {key: value for key, value in record.items()
+              if key not in ("seat_id", "recorded_at")}
+    if mark_pending(seat_id, **fields) is None:
+        return "pending_record_failed"
+
+    code = transport.close_pane(pane_id)
+    if code:
+        return _keep_teardown_failure(seat_id, record, f"pane_close:{code}")
+    deadline = time.monotonic() + TEARDOWN_SECONDS
+    while True:
+        present, code = transport.agent_present(seat_id)
+        if code:
+            return _keep_teardown_failure(seat_id, record, f"agent_list:{code}")
+        if not present:
+            break
+        if time.monotonic() >= deadline:
+            return _keep_teardown_failure(seat_id, record, "agent_exit_timeout")
+        sleeper(min(TEARDOWN_POLL_SECONDS, max(deadline - time.monotonic(), 0)))
+
+    if not _archive_pending_codex(record, sleeper=sleeper):
+        return _keep_teardown_failure(seat_id, record, "codex_archive_failed")
+    clear_pending(seat_id, force=True)
+    return None
 
 
 def pending_seats():
     """Every recorded live seat, each marked with whether anything still owns its wake.
 
-    An owner is any live bus lease: an armed `herdr-bus.py watch`, or a `collect` still
-    blocking. Ownership is per session, not per seat, because that is what the arming
-    rule requires — one doorbell covers every live worker. Two concurrent runs therefore
-    cover each other, which under-reports rather than blocking a turn that is fine.
+    An owner is a recorded parent pane or any live bus lease from the retained watch
+    fallback or a blocking `collect`. A parent lets `emit` push the doorbell directly.
     """
     bus = _load_bus("cannot report pending seats")
     if bus is None:
@@ -1360,7 +1703,7 @@ def pending_seats():
             except (OSError, ValueError):
                 continue  # a half-written or hand-edited breadcrumb proves nothing
             body["listeners"] = listeners
-            body["owned"] = bool(listeners)
+            body["owned"] = bool(listeners) or bool(body.get("parent"))
             entries.append(body)
         return entries
     except (Exception, SystemExit) as err:
@@ -1405,62 +1748,17 @@ class BusLease:
         return False
 
 
-def _bus_emit_paragraph(seat_id):
-    """Bus-emit instruction for a dispatched seat, or "" when no bus is configured.
-
-    The bus root is resolved chair-side and interpolated as a literal: a worker
-    re-expanding $VARS in another workspace or worktree resolves a different
-    default root and would signal the wrong bus.
-    """
-    bus = _load_bus("dispatching without an emit line")
-    if bus is None:
-        return ""
-    try:
-        # the worker runs this from its own cwd, so the root must already be
-        # absolute — a relative or ~-rooted value would land on another tree
-        root = os.path.abspath(os.path.expanduser(bus.bus_dirs()["root"]))
-        seat = bus.sanitize(seat_id)
-    except (Exception, SystemExit) as err:
-        print(f"agent-handoff: bus configured but seat {seat_id!r} has no emit line "
-              f"({err})", file=sys.stderr)
-        return ""
+def publish_instruction():
     return (
-        "\n\nAfter a successful publish, run exactly:\n"
-        f"HERDR_BUS_DIR={shlex.quote(root)} {shlex.quote(BUS_COMMAND)} emit "
-        f"--from {seat} --kind done --ref <artifact path>\n"
-        "Use --kind blocked or --kind failed to match a blocked/failed publish outcome.\n"
-        "Do not edit these values. This is a signal only; the artifact remains the "
-        "deliverable."
+        f"When your result is complete, run: {PUBLISH_COMMAND} publish --file "
+        "<absolute path> (add --outcome blocked or --outcome failed when that is the truth)"
     )
 
 
 def dispatch_text(*, seat_id, run_id, workflow, round_id, attempt, input_digest,
                   run_dir, prompt):
-    """The exact text a dispatched seat receives: prompt, publish command, bus emit."""
-    command = shlex.join([
-        PUBLISH_COMMAND, "publish",
-        "--run-dir", run_dir,
-        "--run-id", run_id,
-        "--workflow", workflow,
-        "--seat", seat_id,
-        "--round", str(round_id),
-        "--attempt", str(attempt),
-        "--input-digest", input_digest,
-        "--outcome", "ok",
-    ])
-    return (
-        f"{prompt}\n\n"
-        "Publish your result once your work is durably written: run exactly this "
-        "command with --payload-file and your result file appended to it. The chair "
-        "reads the artifact, never your terminal output, so no marker line is needed "
-        "and a wrapped or scrolled screen costs nothing:\n"
-        f"{command}\n"
-        "Do not edit those values or recompute the paths. If you cannot finish, "
-        "publish the same way with --outcome blocked or --outcome failed and a "
-        "payload that explains what you need; that publishes the seat but does not "
-        "report it as done."
-        f"{_bus_emit_paragraph(seat_id)}"
-    )
+    """The exact text a dispatched seat receives."""
+    return f"{prompt}\n\n{publish_instruction()}"
 
 
 dispatch_text_for_test = dispatch_text  # name the wiring test binds to
@@ -1569,6 +1867,8 @@ def dispatch_once(transport, target, text, *, settle_timeout_ms, wait_timeout_ms
     verdict = _occupant_verdict(transport, info.occupant, after.occupant) \
         if after.ok else OCCUPANT_UNVERIFIABLE
     decision = classify_post_prompt(reply, verdict, after)
+    if decision in (POST_PROMPT_BLOCKED, POST_PROMPT_OPEN):
+        hide_claude_worker(after)
     if decision == POST_PROMPT_STALLED:
         # Decided before any identity branch, including an unreadable one: herdr saw no
         # state change, which is direct evidence on the DELIVERY axis — the text reached
@@ -1750,17 +2050,57 @@ def read_payload(path):
 
 
 def command_publish(args):
+    identity = {
+        "run_dir": args.run_dir,
+        "run_id": args.run_id,
+        "workflow": args.workflow,
+        "seat": args.seat,
+        "round": args.round,
+        "attempt": args.attempt,
+        "input_digest": args.input_digest,
+    }
+    if any(value is None for value in identity.values()):
+        target = identity["seat"] or os.environ.get("HERDR_SEAT")
+        if not target:
+            raise ValueError("HERDR_SEAT is missing")
+        root = os.environ.get("HERDR_BUS_DIR")
+        if not root:
+            raise ValueError("HERDR_BUS_DIR is missing")
+        path = os.path.join(os.path.realpath(os.path.abspath(os.path.expanduser(root))),
+                            DISPATCH_DIR, check_identity("seat id", target) + ".json")
+        try:
+            with open(path, encoding="utf-8") as handle:
+                record = json.load(handle)
+        except FileNotFoundError:
+            raise ValueError(f"dispatch record is missing: {path}")
+        for key in ("run_dir", "run_id", "workflow", "round", "attempt", "input_digest"):
+            if identity[key] is None:
+                if key not in record:
+                    raise ValueError(f"dispatch record {path} is missing {key}")
+                identity[key] = record[key]
+        if identity["seat"] is None:
+            identity["seat"] = record.get("seat_id", target)
     document = envelope(
-        run_id=check_identity("run id", args.run_id),
-        workflow=check_identity("workflow", args.workflow),
-        seat_id=check_identity("seat id", args.seat),
-        round_id=args.round,
-        attempt=args.attempt,
+        run_id=check_identity("run id", identity["run_id"]),
+        workflow=check_identity("workflow", identity["workflow"]),
+        seat_id=check_identity("seat id", identity["seat"]),
+        round_id=identity["round"],
+        attempt=identity["attempt"],
         outcome=args.outcome,
-        input_digest=check_digest("input digest", args.input_digest),
+        input_digest=check_digest("input digest", identity["input_digest"]),
         payload=read_payload(args.payload_file),
     )
-    print(publish(args.run_dir, document))
+    path = publish(identity["run_dir"], document)
+    if os.environ.get("HERDR_BUS_DIR"):
+        bus = _load_bus("published artifact has no doorbell")
+        if bus is not None:
+            try:
+                bus.emit(bus.sanitize(identity["seat"]),
+                         "done" if args.outcome in ("ok", "recovered") else args.outcome,
+                         ref=path)
+            except (Exception, SystemExit) as error:
+                print(f"agent-handoff: publish notification failed ({error})", file=sys.stderr)
+    print(path)
     return 0
 
 
@@ -1927,16 +2267,26 @@ def command_dispatch(args):
 
 
 def command_prompt(args):
-    # `prompt` carries no run context, so it cannot rebuild the publish command the way
-    # dispatch_text does — but the doorbell needs only the seat. Without this a seat first
-    # contacted through `prompt` publishes with no event at all (ORCH-02).
+    bus = _load_bus("not recording manual dispatch identity")
+    if bus is None:
+        raise RuntimeError("HERDR_BUS_DIR is missing; cannot record dispatch identity")
+    root = os.path.realpath(os.path.abspath(os.path.expanduser(bus.bus_dirs()["root"])))
+    attempt = next_manual_attempt(bus, args.target)
+    write_dispatch_record(
+        args.target, seat_id=args.target, run_id=args.target, workflow="manual", round_id=1,
+        attempt=attempt, input_digest=digest(args.text),
+        run_dir=os.path.join(root, args.target),
+    )
+    transport = SocketTransport()
     result = dispatch_with_stalled_backoff(
-        SocketTransport(), args.target, args.text + _bus_emit_paragraph(args.target),
+        transport, args.target, args.text + "\n\n" + publish_instruction(),
         settle_timeout_ms=args.settle_timeout, wait_timeout_ms=args.wait_timeout,
         retry_stalled_for_ms=args.retry_stalled_for,
     )
     if result["outcome"] in LANDED_OUTCOMES:
-        mark_pending(args.target, via="prompt", state=result["outcome"])
+        mark_pending(args.target, via="prompt", state=result["outcome"],
+                     parent=os.environ.get("HERDR_PANE_ID"),
+                     **_pending_identity(_poll_agent_identity(transport, args.target)))
     print(json.dumps({"target": args.target, **result}, indent=2))
     if result["outcome"] in LANDED_OUTCOMES:
         return 0
@@ -1944,12 +2294,19 @@ def command_prompt(args):
 
 
 def command_pending(args):
-    for seat in args.clear or ():
-        clear_pending(seat)
+    failed = [seat for seat in args.clear or () if not teardown_pending(seat)]
     entries = pending_seats()
     unowned = [entry["seat_id"] for entry in entries if not entry["owned"]]
-    print(json.dumps({"pending": entries, "unowned": unowned}, indent=2))
-    return 1 if unowned else 0
+    print(json.dumps({"pending": entries, "unowned": unowned,
+                      "teardown_failed": failed}, indent=2))
+    return 1 if unowned or failed else 0
+
+
+def command_close(args):
+    reason = close_pending(args.seat)
+    print(json.dumps({"seat": args.seat, "closed": reason is None,
+                      "teardown_failed": reason}, indent=2))
+    return 1 if reason else 0
 
 
 def command_digest(args):
@@ -1988,15 +2345,16 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
 
     publisher = commands.add_parser("publish", help="atomically publish one result artifact")
-    publisher.add_argument("--run-dir", required=True)
-    publisher.add_argument("--run-id", required=True)
-    publisher.add_argument("--workflow", required=True)
-    publisher.add_argument("--seat", required=True)
-    publisher.add_argument("--round", type=int, required=True)
-    publisher.add_argument("--attempt", type=int, required=True)
-    publisher.add_argument("--input-digest", required=True)
+    publisher.add_argument("--run-dir")
+    publisher.add_argument("--run-id")
+    publisher.add_argument("--workflow")
+    publisher.add_argument("--seat")
+    publisher.add_argument("--round", type=int)
+    publisher.add_argument("--attempt", type=int)
+    publisher.add_argument("--input-digest")
     publisher.add_argument("--outcome", choices=OUTCOMES, default="ok")
-    publisher.add_argument("--payload-file", required=True, help="result file, or - for stdin")
+    publisher.add_argument("--file", "--payload-file", dest="payload_file", required=True,
+                           help="result file, or - for stdin")
     publisher.set_defaults(handler=command_publish)
 
     verifier = commands.add_parser("verify", help="report the accepted artifact for a seat")
@@ -2054,16 +2412,23 @@ def main(argv=None):
     )
     prompter.set_defaults(handler=command_prompt)
 
+    closer = commands.add_parser(
+        "close", help="close one seat and hide its Codex thread")
+    closer.add_argument("seat")
+    closer.description = (
+        "Record the live Herdr identity, close its pane, wait for the agent to leave, "
+        "then archive a Codex thread and clear its pending record."
+    )
+    closer.set_defaults(handler=command_close)
+
     pending = commands.add_parser(
         "pending", help="report seats this session left live with nothing listening")
     pending.add_argument("--clear", action="append", metavar="SEAT",
-                         help="drop this seat's breadcrumb first; repeatable")
+                         help="hide this stopped Codex thread, then drop its breadcrumb")
     pending.description = (
-        "Exit 0 nothing is owed — no seat is recorded live, or a bus lease is alive and "
-        "covers them all; 1 at least one recorded seat has no listener, which is a worker "
-        "that will publish into an empty room. Arm "
-        "`herdr-bus.py watch --subscriber chair --ttl 900` as a harness background task, "
-        "or re-run `collect`."
+        "Exit 0 nothing is owed — no seat is recorded live, a parent pane is recorded for "
+        "direct push, or a fallback bus lease is alive and covers all seats; 1 at least one "
+        "recorded seat has neither route. Re-run `collect` or restore the parent route."
     )
     pending.set_defaults(handler=command_pending)
 

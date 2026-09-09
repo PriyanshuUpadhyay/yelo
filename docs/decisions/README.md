@@ -8,6 +8,7 @@ commit.
 
 | #    | Title                                              | Status   | Date       | Origin          |
 |------|----------------------------------------------------|----------|------------|-----------------|
+| 0013 | Push worker wakes to the parent pane, publish owns the wake | accepted | 2026-09-09 | jello           |
 | 0012 | Keep Prime pane auto-resume armed                  | accepted | 2026-08-23 | dotfiles 8e56172|
 | 0006 | A session id selects its own Codex account          | accepted | 2026-09-08 | yelo            |
 | 0010 | Keep the Go launcher for worktree entry            | accepted | 2026-08-21 | dotfiles 8e56172|

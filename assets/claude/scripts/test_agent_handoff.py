@@ -8,7 +8,7 @@ import io
 import json
 import os
 import pathlib
-import shlex
+import re
 import socket
 import sys
 import tempfile
@@ -42,7 +42,9 @@ INPUT_DIGEST = handoff.digest("brief text")
 # blocks the chair's turn on seats that never existed (observed 2026-09-02). Every test in this
 # module runs against a throwaway bus root instead. Classes that manage these variables
 # themselves save and restore around this value, so they are unaffected.
-_MODULE_ENV = ("HERDR_BUS_DIR", "HERDR_WORKSPACE_ID", "HERDR_SOCKET_PATH")
+_MODULE_ENV = ("HERDR_BUS_DIR", "HERDR_WORKSPACE_ID", "HERDR_SOCKET_PATH",
+               "HERDR_PARENT_PANE", "HERDR_SEAT", "HERDR_AGENT_PANE",
+               "AGENT_TEAMMATE_CHILD", "AGENT_HARNESS_HERDR_BIN")
 _module_bus = None
 _saved_module_env = {}
 
@@ -53,6 +55,7 @@ def setUpModule():
     for name in _MODULE_ENV:
         _saved_module_env[name] = os.environ.pop(name, None)
     os.environ["HERDR_BUS_DIR"] = _module_bus.name
+    os.environ["AGENT_HARNESS_HERDR_BIN"] = "/usr/bin/false"
 
 
 def tearDownModule():
@@ -81,7 +84,8 @@ class ScriptedAgent:
 
     def __init__(self, status="idle", occupant="w1:p1:session:a", kind="claude",
                  ready=True, on_prompt=None, on_wait=None, on_get=None, prompt_code=None,
-                 missing=False, prompt_delay=0.0, wait_status=None, prompt_status=None):
+                 missing=False, prompt_delay=0.0, wait_status=None, prompt_status=None,
+                 session_id=None, cwd=None):
         # `wait_status`/`prompt_status` let a wait or prompt reply report a status the
         # following `get` does not, which is how herdr's idle fallback presents.
         self.wait_status = wait_status
@@ -96,6 +100,8 @@ class ScriptedAgent:
         self.prompt_code = prompt_code
         self.missing = missing
         self.prompt_delay = prompt_delay
+        self.session_id = session_id
+        self.cwd = cwd
         self.prompts = 0
         self.gets = 0
         self.waits = 0
@@ -137,7 +143,7 @@ class ScriptedTransport:
                 return handoff.Reply(False, agent.prompt_code)
             if agent.prompt_status is not None:
                 return handoff.Reply(True, None, agent.prompt_status, agent.occupant,
-                                     agent.kind, agent.ready)
+                                     agent.kind, agent.ready, agent.session_id, agent.cwd)
             return self.get(target)
         finally:
             with self._lock:
@@ -150,7 +156,7 @@ class ScriptedTransport:
             agent.on_wait(agent, agent.waits)
         if agent.wait_status is not None:
             return handoff.Reply(True, None, agent.wait_status, agent.occupant,
-                                 agent.kind, agent.ready)
+                                 agent.kind, agent.ready, agent.session_id, agent.cwd)
         return self.get(target)
 
     def get(self, target):
@@ -161,7 +167,7 @@ class ScriptedTransport:
         if agent.missing:
             return handoff.Reply(False, "agent_not_found")
         return handoff.Reply(True, None, agent.status, agent.occupant, agent.kind,
-                             agent.ready)
+                             agent.ready, agent.session_id, agent.cwd)
 
     def read(self, *args, **kwargs):
         raise AssertionError("the collector must never read terminal text")
@@ -418,6 +424,110 @@ class PublicationTests(unittest.TestCase):
     def test_rejects_unsafe_seat_ids(self):
         with self.assertRaises(ValueError):
             handoff.publish(self.run_dir, document(seat_id="../escape"))
+
+    def publish_env(self, seat="hunter-types"):
+        bus_root = os.path.join(self.directory.name, "bus")
+        fake = os.path.join(self.directory.name, "herdr")
+        argv_file = os.path.join(self.directory.name, "herdr-argv")
+        pathlib.Path(fake).write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$@" > "$HERDR_ARGV_FILE"\n', encoding="utf-8")
+        os.chmod(fake, 0o700)
+        values = {
+            "HERDR_BUS_DIR": bus_root,
+            "HERDR_SEAT": seat,
+            "HERDR_PARENT_PANE": "w1:p1",
+            "AGENT_HARNESS_HERDR_BIN": fake,
+            "HERDR_ARGV_FILE": argv_file,
+        }
+        saved = {key: os.environ.get(key) for key in values}
+        os.environ.update(values)
+
+        def restore():
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        self.addCleanup(restore)
+        return bus_root, argv_file
+
+    def write_dispatch(self, bus_root, target="hunter-types", **changes):
+        record = {
+            "run_id": RUN_ID,
+            "workflow": WORKFLOW,
+            "round": 1,
+            "attempt": 1,
+            "input_digest": INPUT_DIGEST,
+            "run_dir": self.run_dir,
+            "recorded_at": time.time(),
+        }
+        record.update(changes)
+        directory = os.path.join(bus_root, handoff.DISPATCH_DIR)
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, target + ".json")
+        pathlib.Path(path).write_text(json.dumps(record), encoding="utf-8")
+        return path
+
+    def test_publish_reads_dispatch_identity_emits_once_and_pushes_once(self):
+        bus_root, argv_file = self.publish_env()
+        self.write_dispatch(bus_root)
+        payload = os.path.join(self.directory.name, "report.md")
+        pathlib.Path(payload).write_text("findings", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = handoff.main(["publish", "--file", payload])
+        self.assertEqual(code, 0)
+        artifact = stdout.getvalue().strip()
+        self.assertEqual(json.loads(pathlib.Path(artifact).read_text())["payload"], "findings")
+        events = os.listdir(os.path.join(bus_root, "events"))
+        self.assertEqual(len(events), 1)
+        event = json.loads(pathlib.Path(bus_root, "events", events[0]).read_text())
+        self.assertEqual((event["from"], event["kind"], event["ref"]),
+                         ("hunter-types", "done", artifact))
+        self.assertEqual(pathlib.Path(argv_file).read_text().splitlines(), [
+            "agent", "prompt", "w1:p1",
+            "herdr-bus doorbell from hunter-types kind done: run scan "
+            "--subscriber chair --consume, then verify",
+        ])
+
+    def test_publish_uses_envelope_seat_id_from_target_keyed_record(self):
+        bus_root, _argv_file = self.publish_env("ws-gpt-ws-rates-1788946181")
+        self.write_dispatch(bus_root, target="ws-gpt-ws-rates-1788946181", seat_id="gpt")
+        payload = os.path.join(self.directory.name, "report.md")
+        pathlib.Path(payload).write_text("findings", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = handoff.main(["publish", "--file", payload])
+        self.assertEqual(code, 0)
+        artifact = json.loads(pathlib.Path(stdout.getvalue().strip()).read_text())
+        self.assertEqual(artifact["seat_id"], "gpt")
+
+    def test_publish_missing_record_fails_with_its_path(self):
+        bus_root, _argv_file = self.publish_env()
+        payload = os.path.join(self.directory.name, "report.md")
+        pathlib.Path(payload).write_text("findings", encoding="utf-8")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = handoff.main(["publish", "--file", payload])
+        expected = os.path.join(bus_root, handoff.DISPATCH_DIR, "hunter-types.json")
+        self.assertNotEqual(code, 0)
+        self.assertIn(expected, stderr.getvalue())
+
+    def test_explicit_publish_identity_wins(self):
+        bus_root, _argv_file = self.publish_env()
+        self.write_dispatch(bus_root, run_dir="/wrong", attempt=9)
+        payload = os.path.join(self.directory.name, "report.md")
+        pathlib.Path(payload).write_text("findings", encoding="utf-8")
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = handoff.main([
+                "publish", "--file", payload, "--run-dir", self.run_dir,
+                "--run-id", RUN_ID, "--workflow", WORKFLOW, "--seat", "hunter-types",
+                "--round", "1", "--attempt", "2", "--input-digest", INPUT_DIGEST,
+            ])
+        self.assertEqual(code, 0)
+        self.assertTrue(stdout.getvalue().strip().endswith("hunter-types.r1.a2.json"))
 
 
 def publisher(run_dir, seat_id, attempt=1, payload="findings", outcome="ok", **kwargs):
@@ -749,7 +859,9 @@ class CollectorTests(unittest.TestCase):
         dispatched = []
 
         def second_attempt_publishes(agent, count, text):
-            dispatched.append(text)
+            path = os.path.join(os.environ["HERDR_BUS_DIR"], handoff.DISPATCH_DIR,
+                                "hunter-types.json")
+            dispatched.append((text, json.loads(pathlib.Path(path).read_text())["attempt"]))
             if count == 2:
                 handoff.publish(self.run_dir, document(attempt=2))
 
@@ -759,8 +871,9 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(seat["state"], handoff.COMPLETED)
         self.assertEqual(seat["accepted_attempt"], 2)
         self.assertEqual(seat["attempts"], [1, 2])
-        self.assertIn("--attempt 1 ", dispatched[0])
-        self.assertIn("--attempt 2 ", dispatched[1])
+        self.assertEqual([attempt for _text, attempt in dispatched], [1, 2])
+        self.assertEqual(dispatched[0][0], dispatched[1][0])
+        self.assertNotIn("--attempt", dispatched[0][0])
 
     def test_retry_is_declined_when_the_confirmation_shows_a_turn_running(self):
         # The idle that licensed the retry was a lull: the turn resumes inside the grace
@@ -1016,20 +1129,16 @@ class CollectorTests(unittest.TestCase):
         self.assertFalse(report["complete"])
         self.assertEqual(seat["state"], handoff.DECLARED_FAILED)
 
-    def test_generated_command_survives_hostile_paths_without_injection(self):
-        # Finding 6: the worker is told to run this line in a shell.
+    def test_generated_command_does_not_expose_host_paths_or_identity(self):
         hostile = os.path.join(self.run_dir, "run dir 'quoted' $(touch /tmp/owned); x")
         collector = handoff.Collector(hostile, RUN_ID, WORKFLOW, 1, None,
                                       deadline_seconds=1.0)
         seat = handoff.Seat("hunter-types", "t", "hunt", INPUT_DIGEST)
         text = collector._dispatch_text(seat, 1)
-        command = [line for line in text.splitlines() if " publish " in line][0]
-        argv = shlex.split(command)
-        self.assertEqual(argv, [
-            handoff.PUBLISH_COMMAND, "publish", "--run-dir", hostile, "--run-id", RUN_ID,
-            "--workflow", WORKFLOW, "--seat", "hunter-types", "--round", "1",
-            "--attempt", "1", "--input-digest", INPUT_DIGEST, "--outcome", "ok",
-        ])
+        self.assertIn("agent-handoff.py publish --file <absolute path>", text)
+        self.assertNotIn(hostile, text)
+        self.assertNotIn(RUN_ID, text)
+        self.assertNotIn(INPUT_DIGEST, text)
 
     def test_unsafe_identities_are_refused_before_dispatch(self):
         with self.assertRaises(ValueError):
@@ -1574,6 +1683,35 @@ class DispatchOnceTests(unittest.TestCase):
             settle_timeout_ms=0, wait_timeout_ms=1000,
             retry_stalled_for_ms=retry_stalled_for_ms, sleeper=sleeper)
         return result, transport
+
+    def test_claude_worker_is_hidden_after_prompt_uptake(self):
+        session_id = "aaaaaaaa-1111-4111-8111-111111111111"
+        cwd = "/private/tmp/project/.herdr/workers"
+        hidden = []
+        original_classifier = handoff._run_claude_classifier
+        original_profile = os.environ.get("CLAUDE_PROFILE_DIR")
+        with tempfile.TemporaryDirectory() as profile:
+            os.environ["CLAUDE_PROFILE_DIR"] = profile
+            project = re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(cwd))
+            transcript = os.path.join(profile, "projects", project, session_id + ".jsonl")
+            os.makedirs(os.path.dirname(transcript))
+            with open(transcript, "w", encoding="utf-8") as handle:
+                handle.write("{}\n")
+            handoff._run_claude_classifier = lambda *args: hidden.append(args)
+            try:
+                result = self.dispatch(ScriptedAgent(
+                    kind="claude", prompt_status="working",
+                    session_id=session_id, cwd=cwd,
+                ))
+            finally:
+                handoff._run_claude_classifier = original_classifier
+                if original_profile is None:
+                    os.environ.pop("CLAUDE_PROFILE_DIR", None)
+                else:
+                    os.environ["CLAUDE_PROFILE_DIR"] = original_profile
+        self.assertEqual(result["outcome"], handoff.LANDED_WORKING)
+        self.assertEqual(hidden, [(os.path.realpath(transcript), session_id,
+                                   os.path.realpath(os.path.join(profile, "projects")))])
 
     def test_default_stalled_prompt_never_retries(self):
         agent = ScriptedAgent(kind="agy", prompt_code=handoff.PROMPT_STALLED_CODE)
@@ -2328,7 +2466,7 @@ class SandboxedRunDirTests(unittest.TestCase):
 class PendingSeatTests(unittest.TestCase):
     """ORCH-02: a turn must not end with a live worker and nothing listening for it."""
 
-    ENV = ("HERDR_BUS_DIR", "HERDR_WORKSPACE_ID", "HERDR_SOCKET_PATH")
+    ENV = ("HERDR_BUS_DIR", "HERDR_WORKSPACE_ID", "HERDR_SOCKET_PATH", "HERDR_PANE_ID")
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -2380,6 +2518,28 @@ class PendingSeatTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(body["unowned"], ["hunter-types"])
         self.assertEqual(body["pending"][0]["via"], "dispatch")
+
+    def test_dispatch_record_uses_target_key_and_keeps_seat_id(self):
+        agent = ScriptedAgent(on_prompt=lambda worker, _count, _text:
+                              setattr(worker, "status", "working"))
+        transport = ScriptedTransport({"target-name": agent})
+        collector = handoff.Collector(self.run_dir, RUN_ID, WORKFLOW, 1, transport,
+                                      deadline_seconds=5.0, grace_seconds=0.01)
+        collector.collect([handoff.Seat("gpt", "target-name", "hunt", INPUT_DIGEST)],
+                          dispatch_only=True)
+        path = os.path.join(self.bus_root, handoff.DISPATCH_DIR, "target-name.json")
+        self.assertEqual(json.loads(pathlib.Path(path).read_text())["seat_id"], "gpt")
+
+    def test_a_recorded_parent_owns_the_push_without_a_watch(self):
+        os.environ["HERDR_PANE_ID"] = "w1:p1"
+        agent = ScriptedAgent(on_prompt=lambda worker, _count, _text:
+                              setattr(worker, "status", "working"))
+        self.collect(agent, dispatch_only=True)
+        code, body = self.run_pending()
+        self.assertEqual(code, 0)
+        self.assertEqual(body["pending"][0]["parent"], "w1:p1")
+        self.assertTrue(body["pending"][0]["owned"])
+        self.assertEqual(body["pending"][0]["listeners"], [])
 
     def test_a_completed_seat_leaves_nothing_owed(self):
         agent = ScriptedAgent(on_prompt=publisher(self.run_dir, "hunter-types"))
@@ -2446,11 +2606,87 @@ class PendingSeatTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(body["pending"], [])
 
-    def test_prompt_carries_the_emit_line_and_records_the_seat(self):
+    def test_close_waits_for_codex_identity_and_exit_then_retries_archive(self):
+        profile = os.path.join(self.directory.name, ".codex-thine")
+        os.makedirs(profile)
+        session_id = "11111111-1111-4111-8111-111111111111"
+        original_home = handoff._codex_home
+        handoff._codex_home = lambda _session_id: os.path.realpath(profile)
+        self.addCleanup(setattr, handoff, "_codex_home", original_home)
+        handoff.mark_pending("hunter-types", via="prompt", state="landed_and_working",
+                             kind="codex")
+        self.assertEqual(self.breadcrumbs(), ["hunter-types.json"])
+
+        class TeardownTransport:
+            def __init__(self):
+                self.calls = []
+                self.gets = 0
+                self.lists = 0
+
+            def get(inner, _target):
+                inner.calls.append("agent.get")
+                inner.gets += 1
+                return handoff.Reply(
+                    True, None, "working", None, "codex", True,
+                    session_id if inner.gets > 1 else None, None, "w1:p2",
+                )
+
+            def close_pane(inner, _pane_id):
+                inner.calls.append("pane.close")
+                return None
+
+            def agent_present(inner, _target):
+                inner.calls.append("agent.list")
+                inner.lists += 1
+                return inner.lists == 1, None
+
+        transport = TeardownTransport()
+        original_transport = handoff.SocketTransport
+        handoff.SocketTransport = lambda budget=None: transport
+        self.addCleanup(setattr, handoff, "SocketTransport", original_transport)
+
+        log = os.path.join(self.directory.name, "codex-calls.jsonl")
+        binary = os.path.join(self.directory.name, "codex")
+        pathlib.Path(binary).write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            "path = pathlib.Path(os.environ['CODEX_TEST_LOG'])\n"
+            "calls = path.read_text().splitlines() if path.exists() else []\n"
+            "calls.append(json.dumps({'argv': sys.argv[1:], 'home': os.environ['CODEX_HOME']}))\n"
+            "path.write_text('\\n'.join(calls) + '\\n')\n"
+            "raise SystemExit(len(calls) == 1)\n",
+            encoding="utf-8",
+        )
+        os.chmod(binary, 0o755)
+        original_binary = handoff.CODEX_BINARY
+        handoff.CODEX_BINARY = binary
+        self.addCleanup(setattr, handoff, "CODEX_BINARY", original_binary)
+        os.environ["CODEX_TEST_LOG"] = log
+        self.addCleanup(os.environ.pop, "CODEX_TEST_LOG", None)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = handoff.main(["close", "hunter-types"])
+        body = json.loads(stdout.getvalue())
+
+        calls = [json.loads(line) for line in pathlib.Path(log).read_text().splitlines()]
+        self.assertEqual(code, 0)
+        self.assertTrue(body["closed"])
+        self.assertIsNone(body["teardown_failed"])
+        self.assertEqual(transport.calls,
+                         ["agent.get", "agent.get", "pane.close", "agent.list", "agent.list"])
+        self.assertEqual([call["argv"] for call in calls],
+                         [["archive", session_id], ["archive", session_id]])
+        self.assertEqual({call["home"] for call in calls}, {os.path.realpath(profile)})
+        self.assertEqual(self.breadcrumbs(), [])
+
+    def test_prompt_records_identity_before_it_sends_and_carries_publish_only(self):
         sent = {}
+        session_id = "22222222-2222-4222-8222-222222222222"
 
         def capture(_transport, target, text, **_kwargs):
             sent["text"] = text
+            path = os.path.join(self.bus_root, handoff.DISPATCH_DIR, "hunter-types.json")
+            sent["dispatch"] = json.loads(pathlib.Path(path).read_text())
             return {"outcome": handoff.LANDED_WORKING, "prompted": True, "reason": None,
                     "status": "working", "occupant": None, "occupant_verdict": None,
                     "next_action": "wait"}
@@ -2459,17 +2695,36 @@ class PendingSeatTests(unittest.TestCase):
         handoff.dispatch_with_stalled_backoff = capture
         self.addCleanup(setattr, handoff, "dispatch_with_stalled_backoff", real)
         real_transport = handoff.SocketTransport
-        handoff.SocketTransport = lambda budget=None: None
+        def register_session(agent, count):
+            if count == 2:
+                agent.session_id = session_id
+
+        transport = ScriptedTransport({"hunter-types": ScriptedAgent(
+            kind="codex", on_get=register_session,
+        )})
+        handoff.SocketTransport = lambda budget=None: transport
         self.addCleanup(setattr, handoff, "SocketTransport", real_transport)
+        original_home = handoff._codex_home
+        handoff._codex_home = lambda _session_id: "/tmp/.codex-test"
+        self.addCleanup(setattr, handoff, "_codex_home", original_home)
         with contextlib.redirect_stdout(io.StringIO()):
             code = handoff.main(["prompt", "--target", "hunter-types", "--text", "round 2"])
         self.assertEqual(code, 0)
         self.assertIn("round 2", sent["text"])
-        self.assertIn("herdr-bus", sent["text"])
-        self.assertIn("--from hunter-types --kind done", sent["text"])
-        self.assertIn(self.bus_root, sent["text"])
+        self.assertIn("agent-handoff.py publish --file <absolute path>", sent["text"])
+        self.assertNotIn("herdr-bus", sent["text"])
+        self.assertNotIn("--run-id", sent["text"])
+        self.assertEqual(sent["dispatch"]["workflow"], "manual")
+        self.assertEqual(sent["dispatch"]["run_id"], "hunter-types")
+        self.assertEqual(sent["dispatch"]["attempt"], 1)
+        self.assertEqual(sent["dispatch"]["input_digest"], handoff.digest("round 2"))
+        self.assertEqual(sent["dispatch"]["run_dir"],
+                         os.path.join(os.path.realpath(self.bus_root), "hunter-types"))
         self.assertEqual(self.breadcrumbs(), ["hunter-types.json"])
-        self.assertEqual(self.run_pending()[0], 1)
+        code, pending = self.run_pending()
+        self.assertEqual(code, 1)
+        self.assertEqual(pending["pending"][0]["agent_session"], session_id)
+        self.assertEqual(pending["pending"][0]["codex_home"], "/tmp/.codex-test")
 
     def test_an_unsent_prompt_records_nothing(self):
         def capture(_transport, target, text, **_kwargs):
@@ -2481,7 +2736,8 @@ class PendingSeatTests(unittest.TestCase):
         handoff.dispatch_with_stalled_backoff = capture
         self.addCleanup(setattr, handoff, "dispatch_with_stalled_backoff", real)
         real_transport = handoff.SocketTransport
-        handoff.SocketTransport = lambda budget=None: None
+        transport = ScriptedTransport({"hunter-types": ScriptedAgent()})
+        handoff.SocketTransport = lambda budget=None: transport
         self.addCleanup(setattr, handoff, "SocketTransport", real_transport)
         with contextlib.redirect_stdout(io.StringIO()):
             code = handoff.main(["prompt", "--target", "hunter-types", "--text", "round 2"])

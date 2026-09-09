@@ -18,6 +18,7 @@ SCRIPT_DIR = pathlib.Path(__file__).parent
 
 ROLE_KEYS = (
     "HERDR_AGENT_PANE", "AGENT_TEAMMATE_CHILD", "HERDR_PANE_ID", "HERDR_ENV",
+    "HERDR_PARENT_PANE", "HERDR_BUS_DIR", "HERDR_WORKSPACE_ID", "HERDR_SEAT",
     "HERDR_REGISTRY_ROOT",
     "HERDR_REGISTRY_CAPABILITY", "HERDR_REGISTRY_KEY", "HERDR_REGISTRY_RESULTS",
 )
@@ -66,17 +67,21 @@ def recorded_host():
     """Replaces the helper's only side-effecting primitive, so a spawn can be inspected
     as the argv it would have produced."""
     commands = []
+    current_provider = ["codex"]
 
     def run(command):
         commands.append(command)
         if "split" in command:
             return Result(json.dumps({"result": {"pane_id": "w1:p9"}}))
+        if command[1:3] == ["agent", "start"]:
+            current_provider[0] = command[command.index("--kind") + 1]
         if command[1:3] == ["agent", "get"]:
+            provider = current_provider[0]
             return Result(json.dumps({"result": {
                 "agent_status": "idle",
                 "agent_session": {
-                    "source": "herdr:codex",
-                    "agent": "codex",
+                    "source": f"herdr:{provider}",
+                    "agent": provider,
                     "kind": "id",
                     "value": "11111111-1111-4111-8111-111111111111",
                 },
@@ -173,8 +178,10 @@ class WorkerSessionTest(unittest.TestCase):
 
 
 class ReservedMarkerTest(unittest.TestCase):
-    def test_a_caller_cannot_supply_either_marker(self):
-        for entry in ("HERDR_AGENT_PANE=0", "AGENT_TEAMMATE_CHILD=0"):
+    def test_a_caller_cannot_supply_reserved_env(self):
+        for entry in ("HERDR_AGENT_PANE=0", "AGENT_TEAMMATE_CHILD=0",
+                      "HERDR_PARENT_PANE=w1:p2", "HERDR_BUS_DIR=/tmp/other",
+                      "HERDR_SEAT=other"):
             with self.subTest(entry=entry):
                 with self.assertRaises(RuntimeError) as raised:
                     teammate.check_env([entry])
@@ -187,19 +194,48 @@ class ReservedMarkerTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             teammate.check_env(["not-an-assignment"])
 
+    def test_an_unsafe_seat_name_is_rejected_before_spawn(self):
+        args = spawn_args()
+        args.name = "../other"
+        with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"), \
+                recorded_host() as commands:
+            with self.assertRaises(RuntimeError):
+                teammate.invoke_herdr(args)
+        self.assertEqual(commands, [])
+
     def test_the_herdr_split_plants_the_markers_after_caller_env(self):
-        with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1"), recorded_host() as commands:
+        with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"), \
+                recorded_host() as commands:
             teammate.invoke_herdr(spawn_args(env=["FOO=bar"]))
         split = next(command for command in commands if "split" in command)
         planted = [split[index + 1] for index, token in enumerate(split) if token == "--env"]
-        self.assertEqual(planted, ["FOO=bar", "HERDR_AGENT_PANE=1", "AGENT_TEAMMATE_CHILD=1"])
+        self.assertEqual(planted, ["FOO=bar", "HERDR_PARENT_PANE=w1:p1",
+                                   f"HERDR_BUS_DIR={os.path.realpath('/tmp')}/herdr-bus-"
+                                   f"{os.getuid()}/w1", "HERDR_SEAT=w1",
+                                   "HERDR_AGENT_PANE=1", "AGENT_TEAMMATE_CHILD=1"])
 
-    def test_herdr_codex_workers_return_the_identity_archived_by_the_session_hook(self):
-        with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1"), recorded_host() as commands:
+    def test_herdr_codex_workers_record_identity_without_live_archive(self):
+        with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"), \
+                recorded_host() as commands:
             result = teammate.invoke_herdr(spawn_args(provider="codex"))
         session_id = "11111111-1111-4111-8111-111111111111"
         self.assertEqual(result["session_id"], session_id)
-        self.assertNotIn([teammate.PROVIDERS["codex"], "archive", session_id], commands)
+        self.assertNotIn("archive", [part for command in commands for part in command])
+
+    def test_herdr_agy_workers_are_hidden_after_their_identity_is_known(self):
+        hidden = []
+        original, original_health = teammate.hide_agy_worker, teammate.agy_health
+        teammate.hide_agy_worker = hidden.append
+        teammate.agy_health = lambda _started_at: None
+        try:
+            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"), \
+                    recorded_host():
+                result = teammate.invoke_herdr(spawn_args(provider="agy"))
+        finally:
+            teammate.hide_agy_worker = original
+            teammate.agy_health = original_health
+        self.assertEqual(hidden, ["11111111-1111-4111-8111-111111111111"])
+        self.assertEqual(result["session_id"], hidden[0])
 
     def test_a_retained_pane_is_tagged_before_agent_start_fails(self):
         commands = []
@@ -215,7 +251,7 @@ class ReservedMarkerTest(unittest.TestCase):
         original = teammate.run
         teammate.run = run
         try:
-            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1"):
+            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"):
                 with self.assertRaisesRegex(RuntimeError, "pane retained for diagnosis: w1:p9"):
                     teammate.invoke_herdr(spawn_args(provider="codex"))
         finally:
@@ -228,7 +264,7 @@ class ReservedMarkerTest(unittest.TestCase):
 
     def test_invalid_codex_agent_identity_is_never_archived(self):
         value = {"agent_session": {"agent": "codex", "kind": "id", "value": "not-a-uuid"}}
-        self.assertIsNone(teammate.codex_session_id(value))
+        self.assertIsNone(teammate.agent_session_id(value, "codex"))
 
 
 class AccountEnvTest(unittest.TestCase):
@@ -499,11 +535,13 @@ class AgyHealthTest(unittest.TestCase):
         os.environ["AGENT_TEAMMATE_AGY_HEALTH_TIMEOUT"] = "0.3"
         try:
             os.environ["AGENT_TEAMMATE_AGY_APP_DIR"] = healthy
-            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1"), recorded_host():
+            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"), \
+                    recorded_host():
                 result = teammate.invoke_herdr(spawn_args(provider="agy"))
             self.assertEqual(result["pane"], "w1:p9")
             os.environ["AGENT_TEAMMATE_AGY_APP_DIR"] = sick
-            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1"), recorded_host():
+            with role(HERDR_ENV="1", HERDR_PANE_ID="w1:p1", HERDR_WORKSPACE_ID="w1"), \
+                    recorded_host():
                 with self.assertRaisesRegex(RuntimeError, "pane retained for diagnosis: w1:p9"):
                     teammate.invoke_herdr(spawn_args(provider="agy"))
         finally:

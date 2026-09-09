@@ -1,12 +1,18 @@
 import contextlib, importlib.util, io, json, os, shutil, subprocess, tempfile, time, unittest
 BUS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "herdr-bus.py")
+_SCRUBBED_ENV = ("HERDR_PARENT_PANE", "HERDR_SEAT", "HERDR_BUS_DIR",
+                 "HERDR_AGENT_PANE", "AGENT_TEAMMATE_CHILD",
+                 "AGENT_HARNESS_HERDR_BIN")
 
 _spec = importlib.util.spec_from_file_location("herdr_bus", BUS)
 bus = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bus)
 
 def run(env, *args):
-    return subprocess.run(["python3", BUS, *args], env={**os.environ, **env},
+    base = {k: v for k, v in os.environ.items()
+            if k not in _SCRUBBED_ENV}
+    base["AGENT_HARNESS_HERDR_BIN"] = "/usr/bin/false"
+    return subprocess.run(["python3", BUS, *args], env={**base, **env},
                           capture_output=True, text=True)
 
 class TestEmitScan(unittest.TestCase):
@@ -25,6 +31,40 @@ class TestEmitScan(unittest.TestCase):
         self.assertEqual(body["from"], "coder-1")
         self.assertEqual(str(body["ts"]), name.split(".")[0].lstrip("0"))  # one time_ns feeds both
         self.assertEqual(os.listdir(os.path.join(self.dir, "tmp")), [])
+
+    def test_emit_push_is_fixed_and_nonfatal(self):
+        fake_dir = tempfile.mkdtemp()
+        fake = os.path.join(fake_dir, "herdr")
+        argv_file = os.path.join(fake_dir, "argv")
+        with open(fake, "w") as fh:
+            fh.write('#!/bin/sh\nprintf "%s\\n" "$@" > "$HERDR_ARGV_FILE"\n')
+        os.chmod(fake, 0o700)
+        push_env = {**self.env, "HERDR_PARENT_PANE": "w1:p1",
+                    "AGENT_HARNESS_HERDR_BIN": fake, "HERDR_ARGV_FILE": argv_file}
+        r = run(push_env, "emit", "--from", "Coder/1", "--kind", "Done!",
+                "--ref", "/tmp/secret-ref", "--data", '"worker prose"')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(argv_file) as fh:
+            argv = fh.read().splitlines()
+        self.assertEqual(argv, ["agent", "prompt", "w1:p1",
+                         "herdr-bus doorbell from coder-1 kind done: run scan "
+                         "--subscriber chair --consume, then verify"])
+        self.assertNotIn("secret-ref", " ".join(argv))
+        self.assertNotIn("worker prose", " ".join(argv))
+
+        os.unlink(argv_file)
+        no_parent = run({**self.env, "AGENT_HARNESS_HERDR_BIN": fake,
+                         "HERDR_ARGV_FILE": argv_file},
+                        "emit", "--from", "coder-1", "--kind", "done")
+        self.assertEqual(no_parent.returncode, 0, no_parent.stderr)
+        self.assertFalse(os.path.exists(argv_file))
+
+        failed = run({**self.env, "HERDR_PARENT_PANE": "w1:p1",
+                      "AGENT_HARNESS_HERDR_BIN": "/usr/bin/false"},
+                     "emit", "--from", "coder-1", "--kind", "done")
+        self.assertEqual(failed.returncode, 0)
+        self.assertEqual(failed.stderr.count(
+            "push failed; the chair finds the event on its next scan"), 1)
 
     def test_workspace_default_uses_the_cross_sandbox_temp_root(self):
         workspace = f"test-{os.getpid()}-{time.time_ns()}"
@@ -157,7 +197,7 @@ class TestWatch(unittest.TestCase):
     def test_error_path_still_prints_final_json(self):
         r = subprocess.run(["python3", BUS, "watch", "--subscriber", "chair"],
                            env={k: v for k, v in os.environ.items()
-                                if k not in ("HERDR_BUS_DIR", "HERDR_WORKSPACE_ID")},
+                                if k not in _SCRUBBED_ENV + ("HERDR_WORKSPACE_ID",)},
                            capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(json.loads(r.stdout.splitlines()[-1])["reason"], "error")
@@ -192,7 +232,9 @@ class TestWatch(unittest.TestCase):
         try:
             r = subprocess.run(["python3", BUS, "watch", "--subscriber", "chair",
                                 "--ttl", "nan", "--tick", "0.05"],
-                               env={**os.environ, **self.env},
+                               env={**{k: v for k, v in os.environ.items()
+                                       if k not in _SCRUBBED_ENV}, **self.env,
+                                    "AGENT_HARNESS_HERDR_BIN": "/usr/bin/false"},
                                capture_output=True, text=True, timeout=5)
         except subprocess.TimeoutExpired:
             self.fail("watch --ttl nan never exited: NaN deadline is unreachable")
@@ -493,23 +535,15 @@ def load_agent_handoff():
     spec.loader.exec_module(ah)
     return ah
 
-def emit_line(text):
-    """The one line a worker runs to ring the doorbell.
-
-    Located by the env prefix it must start with, never by the command name: that name
-    moved to a PATH shim once already, and a locator that finds nothing raises before any
-    assertion runs, so three tests here reported a stale name and a real regression with
-    the same traceback.
-    """
-    lines = [l for l in text.splitlines() if l.startswith("HERDR_BUS_DIR=")]
-    assert len(lines) == 1, f"expected exactly one emit line, found {lines!r}"
+def publish_line(text):
+    lines = [line for line in text.splitlines() if " publish --file " in line]
+    assert len(lines) == 1, f"expected exactly one publish line, found {lines!r}"
     return lines[0]
 
 
 class TestDispatchWiring(unittest.TestCase):
     def setUp(self):
-        prev = {name: os.environ.get(name)
-                for name in ("HERDR_BUS_DIR", "HERDR_BUS_COMMAND")}
+        prev = {name: os.environ.get(name) for name in ("HERDR_BUS_DIR",)}
         def restore():
             for name, value in prev.items():
                 if value is None:
@@ -518,62 +552,15 @@ class TestDispatchWiring(unittest.TestCase):
                     os.environ[name] = value
         self.addCleanup(restore)
 
-    def test_dispatch_text_contains_emit_with_literal_bus_root(self):
+    def test_dispatch_text_contains_one_env_driven_publish_line(self):
         ah = load_agent_handoff()
         os.environ["HERDR_BUS_DIR"] = "/tmp/bus-under-test"
         text = ah.dispatch_text_for_test(seat_id="coder-1", run_id="r", workflow="wf",
                                          round_id=1, attempt=1, input_digest="0" * 64,
                                          run_dir="/tmp/rd", prompt="do the thing")
-        self.assertIn("emit", emit_line(text))
-        self.assertIn("HERDR_BUS_DIR=/tmp/bus-under-test", text)  # literal, not $VAR
-        self.assertIn("--from coder-1 --kind done", text)
-        self.assertLess(text.index("publish"), text.index("emit"))  # emit only after publish
-
-    def test_relative_bus_root_is_interpolated_absolute(self):
-        # a worker runs the line from its own cwd, so a relative root would
-        # resolve to a different tree entirely
-        import shlex
-        ah = load_agent_handoff()
-        d = tempfile.mkdtemp()
-        cwd = os.getcwd()
-        os.chdir(d)
-        self.addCleanup(os.chdir, cwd)
-        os.environ["HERDR_BUS_DIR"] = "relative/bus"
-        text = ah.dispatch_text(**DISPATCH_KW)
-        root = shlex.split(emit_line(text))[0].split("=", 1)[1]
-        self.assertTrue(os.path.isabs(root), root)
-        self.assertTrue(root.endswith("relative/bus"), root)
-
-    def test_bus_root_with_spaces_survives_the_shell(self):
-        import shlex
-        # Pinned to this checkout's script: the shipped default is a PATH shim, and a
-        # test that needs ~/.local/bin populated measures the machine, not the wiring.
-        os.environ["HERDR_BUS_COMMAND"] = BUS
-        ah = load_agent_handoff()
-        spaced = os.path.join(tempfile.mkdtemp(), "herdr bus")
-        os.environ["HERDR_BUS_DIR"] = spaced
-        text = ah.dispatch_text(**DISPATCH_KW)
-        parts = shlex.split(emit_line(text))
-        self.assertEqual(parts[0], f"HERDR_BUS_DIR={spaced}")
-        self.assertEqual(parts[1], BUS)
-        self.assertEqual(parts[2], "emit")
-        # and it actually runs: the placeholder is the only part a worker edits
-        cmd = emit_line(text).replace("--ref <artifact path>", "--ref /tmp/artifact.json")
-        r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(os.listdir(os.path.join(spaced, "events"))), 1)
-
-    def test_unloadable_helper_degrades_to_publish_only(self):
-        ah = load_agent_handoff()
-        d = tempfile.mkdtemp()
-        stub = os.path.join(d, "herdr-bus.py")
-        with open(stub, "w") as fh:
-            fh.write("def broken(:\n")  # SyntaxError escapes a narrow except tuple
-        ah.HERDR_BUS = stub
-        os.environ["HERDR_BUS_DIR"] = d
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            text = ah.dispatch_text(**DISPATCH_KW)
-        self.assertIn("publish", text)
-        self.assertNotIn("herdr-bus.py", text)
-        self.assertIn("unusable", err.getvalue())
+        line = publish_line(text)
+        self.assertIn("agent-handoff.py publish --file <absolute path>", line)
+        self.assertIn("--outcome blocked", line)
+        self.assertNotIn("HERDR_BUS_DIR", text)
+        self.assertNotIn("--run-id", text)
+        self.assertNotIn("emit", text)

@@ -242,22 +242,22 @@ class HostContextTest(unittest.TestCase):
         self.assertNotIn("herdr-registry.py request", body)
         self.assertNotIn("agent-teammate.py", body)
 
-    def test_codex_and_agy_workers_invoke_history_containment(self):
-        for provider in ("codex", "agy"):
-            calls = []
+    def test_agy_workers_invoke_history_containment(self):
+        calls = []
 
-            def run(command, **kwargs):
-                calls.append((command, kwargs))
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
 
-            with self.subTest(provider=provider), patch.dict(
-                os.environ, {"HERDR_AGENT_PANE": "1"}, clear=True
-            ):
-                context.contain_worker_history(provider, '{"id":"worker"}', run)
-            self.assertEqual(
-                calls[0][0],
-                [str(context.WORKER_HISTORY), "--provider", provider],
-            )
-            self.assertEqual(calls[0][1]["input"], '{"id":"worker"}')
+        with patch.dict(os.environ, {"HERDR_AGENT_PANE": "1"}, clear=True):
+            context.contain_worker_history("agy", '{"id":"worker"}', run)
+        self.assertEqual(calls[0][0], [str(context.WORKER_HISTORY), "--provider", "agy"])
+        self.assertEqual(calls[0][1]["input"], '{"id":"worker"}')
+
+    def test_codex_history_is_contained_after_spawn(self):
+        calls = []
+        with patch.dict(os.environ, {"HERDR_AGENT_PANE": "1"}, clear=True):
+            context.contain_worker_history("codex", "{}", lambda *args: calls.append(args))
+        self.assertEqual(calls, [])
 
     def test_root_sessions_do_not_invoke_history_containment(self):
         calls = []
