@@ -433,10 +433,11 @@ class RoleRoutingTest(unittest.TestCase):
     def test_claude_role_applies_model_and_effort(self):
         route, args = self.route({
             "provider": "claude", "model": "sonnet", "effort": "medium",
+            "permission": "auto",
             "runnerId": "claude-sonnet-medium",
         })
         self.assertEqual(route["runnerId"], "claude-sonnet-medium")
-        self.assertEqual(args, ["--model", "sonnet", "--effort", "medium"])
+        self.assertEqual(args, ["--model", "sonnet", "--effort", "medium", "--permission-mode", "auto"])
 
     def test_codex_role_applies_model_effort_and_permissions(self):
         _, args = self.route({
@@ -451,9 +452,11 @@ class RoleRoutingTest(unittest.TestCase):
     def test_agy_role_applies_model_and_effort(self):
         _, args = self.route({
             "provider": "agy", "model": "gemini-3.6-flash-high", "effort": "high",
+            "permission": "skip",
         }, provider="agy")
         self.assertEqual(args, [
             "--model", "gemini-3.6-flash-high", "--effort", "high",
+            "--dangerously-skip-permissions",
         ])
 
     def test_role_rejects_provider_mismatch(self):
@@ -467,6 +470,13 @@ class RoleRoutingTest(unittest.TestCase):
             self.route({
                 "provider": "claude", "model": "sonnet", "effort": "medium",
             }, agent_args=["--model", "opus"])
+
+    def test_role_rejects_permission_override(self):
+        with self.assertRaisesRegex(RuntimeError, "remove the conflicting"):
+            self.route({
+                "provider": "claude", "model": "sonnet", "effort": "medium",
+                "permission": "auto",
+            }, agent_args=["--permission-mode", "plan"])
 
 
 if __name__ == "__main__":
