@@ -380,9 +380,9 @@ def has_flag(agent_args, flags):
 
 def resolve_role(role, provider, agent_args):
     owned_flags = {
-        "claude": ("--model", "--effort"),
+        "claude": ("--model", "--effort", "--permission-mode", "--mode", "--dangerously-skip-permissions", "--yolo"),
         "codex": ("-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval"),
-        "agy": ("--model", "--effort"),
+        "agy": ("--model", "--effort", "--permission-mode", "--mode", "--dangerously-skip-permissions", "--yolo"),
     }
     canonical_provider = "claude" if provider == "cloud" else provider
     if has_flag(agent_args, owned_flags[canonical_provider]):
@@ -420,6 +420,8 @@ def resolve_role(role, provider, agent_args):
         if not model or not effort:
             raise RuntimeError(f"role {role!r} must resolve both model and effort for Claude")
         flags += ["--model", model, "--effort", effort]
+        if route.get("permission"):
+            flags += ["--permission-mode", route["permission"]]
     elif canonical_provider == "codex":
         if not model or not effort:
             raise RuntimeError(f"role {role!r} must resolve both model and effort for Codex")
@@ -434,6 +436,10 @@ def resolve_role(role, provider, agent_args):
         if not effort:
             raise RuntimeError(f"role {role!r} must resolve effort for AGY")
         flags += ["--effort", effort]
+        if route.get("permission") == "skip":
+            flags += ["--dangerously-skip-permissions"]
+        elif route.get("permission"):
+            flags += ["--mode", route["permission"]]
     return route, [*flags, *agent_args]
 
 
