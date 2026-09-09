@@ -17,6 +17,7 @@ AGENT_START_RETRY_SECONDS = 10.0
 AGENT_START_RETRY_INTERVAL_SECONDS = 0.1
 PANE_BUSY_MARKERS = ("agent_pane_busy", "not an available shell")
 ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SEAT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 TRUST_SCRIPT = "/Users/priyanshu/.claude/scripts/ensure-cwd-trust.sh"
 PROVIDER_TRUST_SCRIPT = "/Users/priyanshu/.claude/scripts/ensure-agent-cwd-trust.py"
 ROUTING_SCRIPT = "/Users/priyanshu/.claude/scripts/agent-routing.mjs"
@@ -30,6 +31,7 @@ RESUME_FLAGS = ("-r", "--resume", "-c", "--continue", "--fork-session")
 WORKER_POOL = (".herdr", "workers")
 WORKER_SID_PREFIX = "aaaaaaaa"
 WORKER_MARKERS = ("HERDR_AGENT_PANE", "AGENT_TEAMMATE_CHILD")
+RESERVED_ENV = (*WORKER_MARKERS, "HERDR_PARENT_PANE", "HERDR_BUS_DIR", "HERDR_SEAT")
 CHILD_ENV = "AGENT_TEAMMATE_CHILD=1"
 WORKER_REFUSAL = (
     "worker sessions are leaves and do not spawn descendants or visible panes. "
@@ -45,6 +47,9 @@ AGY_LOG_NAME = re.compile(r"^cli-(\d{8}_\d{6})\.log$")
 AGY_EXIT_MARKER = "CLI program exited"
 AGY_LOG_INTEREST = re.compile(r"not logged|expired=|eligib|panic|fatal|exited|OAuth", re.IGNORECASE)
 AGY_LOG_PREFIX = "ERROR: logging before google.Init: "
+WORKER_HISTORY_CLASSIFIER = os.path.expanduser(
+    "~/.claude/hooks/worker-history-classifier.py"
+)
 PROVIDERS = {
     "claude": "/Users/priyanshu/.local/bin/claude",
     "cloud": "/Users/priyanshu/.local/bin/claude",
@@ -285,13 +290,22 @@ def check_env(entries):
         name, separator, _ = entry.partition("=")
         if not separator or not name or any(c in entry for c in "\0\n"):
             raise RuntimeError(f"--env {entry!r} is not KEY=VALUE")
-        # The child markers are what the worker contract and both guards read; a caller
-        # that could set them could hand a child the orchestrator contract.
-        if name in WORKER_MARKERS:
+        # A caller must not replace the worker role or its return route.
+        if name in RESERVED_ENV:
             raise RuntimeError(f"--env {name} is reserved; the helper plants it itself")
         if not ENV_NAME.match(name):
             raise RuntimeError(f"--env {entry!r} is not KEY=VALUE: {name!r} is not a shell name")
     return entries
+
+
+def herdr_bus_root():
+    root = os.environ.get("HERDR_BUS_DIR")
+    if not root:
+        workspace = os.environ.get("HERDR_WORKSPACE_ID")
+        if not workspace:
+            raise RuntimeError("HERDR_WORKSPACE_ID is missing; cannot route worker results")
+        root = os.path.join("/tmp", f"herdr-bus-{os.getuid()}", workspace)
+    return os.path.realpath(os.path.abspath(os.path.expanduser(root)))
 
 
 def account_flag(agent_args):
@@ -497,25 +511,41 @@ def agent_record(binary, name):
     return value if isinstance(value, dict) else {}
 
 
-def codex_session_id(value):
+def agent_session_id(value, provider):
     if isinstance(value, dict):
         session = value.get("agent_session") or value.get("agentSession")
-        if isinstance(session, dict) and session.get("agent") == "codex":
+        if isinstance(session, dict) and session.get("agent") == provider:
             candidate = session.get("value")
             try:
                 return str(uuid.UUID(str(candidate)))
             except ValueError:
                 return None
         for child in value.values():
-            candidate = codex_session_id(child)
+            candidate = agent_session_id(child, provider)
             if candidate:
                 return candidate
     if isinstance(value, list):
         for child in value:
-            candidate = codex_session_id(child)
+            candidate = agent_session_id(child, provider)
             if candidate:
                 return candidate
     return None
+
+
+def hide_agy_worker(session_id):
+    environment = dict(os.environ)
+    environment["HERDR_AGENT_PANE"] = "1"
+    result = subprocess.run(
+        [WORKER_HISTORY_CLASSIFIER, "--provider", "agy"],
+        input=json.dumps({"conversationId": session_id}),
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env=environment,
+    )
+    if result.returncode != 0 or result.stderr.strip():
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "classifier failed")
 
 
 def invoke_herdr(args):
@@ -523,6 +553,8 @@ def invoke_herdr(args):
     anchor = os.environ.get("HERDR_PANE_ID")
     if not anchor:
         raise RuntimeError("HERDR_PANE_ID is missing; cannot anchor a visible teammate")
+    if not SEAT_NAME.match(args.name):
+        raise RuntimeError(f"agent name {args.name!r} cannot be used as HERDR_SEAT")
     target = anchor
     if args.direction == "right":
         layout = tab_layout(binary, anchor)
@@ -534,9 +566,12 @@ def invoke_herdr(args):
     split = json_output(run([
         binary, "pane", "split", "--pane", target,
         "--direction", args.direction, "--cwd", args.cwd, "--no-focus",
+        *extra, "--env", f"HERDR_PARENT_PANE={anchor}",
+        "--env", f"HERDR_BUS_DIR={herdr_bus_root()}",
+        "--env", f"HERDR_SEAT={args.name}",
         # markers last: with duplicate assignments the last one wins, so they cannot be
         # overridden by caller env even if the reserved-name check is ever relaxed
-        *extra, "--env", "HERDR_AGENT_PANE=1", "--env", CHILD_ENV,
+        "--env", "HERDR_AGENT_PANE=1", "--env", CHILD_ENV,
     ]), "herdr pane split")
     pane = find_value(split.get("result", split), ("pane_id", "paneId"))
     if not pane:
@@ -579,8 +614,16 @@ def invoke_herdr(args):
         "host": "herdr", "provider": provider, "name": args.name, "pane": pane,
         "status": find_value(record, ("agent_status",)) or "unknown",
     }
-    if provider == "codex":
-        session_id = codex_session_id(record)
+    if provider in ("codex", "agy"):
+        session_id = agent_session_id(record, provider)
+        if session_id and provider == "agy":
+            try:
+                hide_agy_worker(session_id)
+            except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+                raise RuntimeError(
+                    f"could not hide agy worker {session_id}; pane retained for diagnosis: "
+                    f"{pane}; {error}"
+                ) from error
         if session_id:
             result["session_id"] = session_id
     return result

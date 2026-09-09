@@ -137,7 +137,7 @@ The runtime adapter translates workflow requirements; the active agent-host cont
 
 
 def contain_worker_history(provider, payload, runner=subprocess.run):
-    if provider not in ("codex", "agy") or not worker_session():
+    if provider != "agy" or not worker_session():
         return
     try:
         runner(

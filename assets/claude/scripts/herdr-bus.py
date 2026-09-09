@@ -3,7 +3,7 @@
 completion truth stays with agent-handoff.py verify. Delivery is set
 difference (events minus per-subscriber markers), never a cursor watermark,
 so publication order and consumption order are independent."""
-import argparse, json, math, os, re, sys, time, uuid
+import argparse, json, math, os, re, subprocess, sys, time, uuid
 
 IDENT = re.compile(r"^[a-z0-9-]{1,32}$")
 NAME = re.compile(r"^(\d{19})\.([a-z0-9-]{1,32})\.([a-z0-9-]{1,32})\.([0-9a-f]{8})\.json$")
@@ -42,6 +42,21 @@ def emit(from_, kind, ref=None, data=None):
     # No fsync: rename atomicity gives process-crash safety; power-loss
     # durability is deliberately not promised (artifacts are the durable truth).
     os.rename(tmp, os.path.join(d["events"], name))
+    parent = os.environ.get("HERDR_PARENT_PANE")
+    if parent:
+        text = (f"herdr-bus doorbell from {from_} kind {kind}: "
+                "run scan --subscriber chair --consume, then verify")
+        try:
+            result = subprocess.run([
+                os.environ.get("AGENT_HARNESS_HERDR_BIN", "herdr"),
+                "agent", "prompt", parent, text,
+            ], timeout=10, check=False, capture_output=True)
+            if result.returncode:
+                raise RuntimeError
+        except Exception:
+            # ponytail: no occupant-identity check; upgrade with `herdr agent get <parent>`
+            # and skip the push when the pane is blocked or its occupant was replaced.
+            print("push failed; the chair finds the event on its next scan", file=sys.stderr)
     print(f"herdr-bus: root={d['root']}", file=sys.stderr)
     return name
 
