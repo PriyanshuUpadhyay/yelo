@@ -50,6 +50,14 @@ class EnsureAgentCwdTrustTests(unittest.TestCase):
         self.assertIsNone(trust.containing_root(str(self.root), roots))
         self.assertIsNone(trust.containing_root(str(self.base / "other"), roots))
 
+    def test_default_roots_include_the_current_users_herdr_bus(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("AGENT_TRUST_ROOTS", None)
+            self.assertIn(
+                f"/private/tmp/herdr-bus-{os.getuid()}",
+                trust.configured_roots(),
+            )
+
     def test_rejects_a_writable_generated_path_component(self):
         unsafe = self.root / "unsafe"
         unsafe.mkdir(mode=0o777)
@@ -64,6 +72,44 @@ class EnsureAgentCwdTrustTests(unittest.TestCase):
         self.assertIn(
             f'[projects."{target}"]\ntrust_level = "trusted"',
             self.codex.read_text(),
+        )
+
+    def test_codex_trusts_every_existing_profile_config(self):
+        default = self.base / ".codex" / "config.toml"
+        profile = self.base / ".codex-alpha" / "config.toml"
+        default.parent.mkdir()
+        profile.parent.mkdir()
+        default.write_text('model = "default"\n')
+        profile.write_text('model = "alpha"\n')
+        env = os.environ.copy()
+        env.pop("CODEX_CONFIG_PATH", None)
+        env.update({
+            "HOME": str(self.base),
+            "AGENT_TRUST_ROOTS": str(self.root),
+            "AGENT_CWD_TRUST_LOCK": str(self.base / "trust.lock"),
+        })
+
+        result = subprocess.run(
+            [
+                str(HERE / "ensure-agent-cwd-trust.py"),
+                "--provider",
+                "codex",
+                "--cwd",
+                str(self.cwd),
+            ],
+            capture_output=True,
+            check=True,
+            env=env,
+            text=True,
+        )
+
+        target = os.path.realpath(self.cwd)
+        entry = f'[projects."{target}"]\ntrust_level = "trusted"'
+        self.assertIn(entry, default.read_text())
+        self.assertIn(entry, profile.read_text())
+        self.assertEqual(
+            json.loads(result.stdout)["configs"],
+            sorted(map(str, (default, profile))),
         )
 
     def test_codex_uses_the_generated_git_root(self):

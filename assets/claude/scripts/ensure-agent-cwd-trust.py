@@ -3,6 +3,7 @@
 import argparse
 import copy
 import fcntl
+import glob
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import tempfile
 DEFAULT_ROOTS = (
     "/private/tmp/councils",
     f"/private/tmp/claude-{os.getuid()}",
+    f"/private/tmp/herdr-bus-{os.getuid()}",
     os.path.expanduser("~/.herdr/runs"),
 )
 
@@ -121,6 +123,16 @@ def trust_codex(path, workspace):
     return True
 
 
+# The yelo launcher picks a Codex profile at launch, after this preflight runs.
+# Trust for a generated tmp directory is harmless in every profile.
+def codex_config_paths():
+    if "CODEX_CONFIG_PATH" in os.environ:
+        return [os.path.expanduser(os.environ["CODEX_CONFIG_PATH"])]
+    default = os.path.expanduser("~/.codex/config.toml")
+    profiles = glob.glob(os.path.expanduser("~/.codex-*/config.toml"))
+    return sorted({default, *profiles})
+
+
 def load_json(path):
     try:
         with open(path) as handle:
@@ -178,9 +190,6 @@ def main():
     except ValueError as error:
         parser.error(str(error))
 
-    codex_config = os.path.expanduser(
-        os.environ.get("CODEX_CONFIG_PATH", "~/.codex/config.toml")
-    )
     agy_settings = os.path.expanduser(
         os.environ.get("AGY_SETTINGS_PATH", "~/.gemini/antigravity-cli/settings.json")
     )
@@ -203,19 +212,25 @@ def main():
                 target = workspace if root else None
             elif root:
                 target = codex_trust_target(workspace, root)
-                changed = trust_codex(codex_config, target)
+                configs = codex_config_paths()
+                changes = [trust_codex(path, target) for path in configs]
+                changed = any(changes)
             else:
                 target = None
                 changed = False
+                configs = []
     except ValueError as error:
         parser.error(str(error))
 
-    print(json.dumps({
+    result = {
         "provider": args.provider,
         "managed": target is not None,
         "target": target,
         "changed": changed,
-    }))
+    }
+    if args.provider == "codex":
+        result["configs"] = configs
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":
