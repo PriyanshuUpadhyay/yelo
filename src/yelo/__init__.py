@@ -1,3 +1,3 @@
 """Claude and Codex profiles and UsageHUD."""
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
