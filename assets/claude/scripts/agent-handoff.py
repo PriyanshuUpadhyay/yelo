@@ -839,7 +839,7 @@ def _reply(code, result):
 
 
 def _claude_history_roots():
-    roots = [os.environ.get("CLAUDE_PROFILE_DIR"), os.path.expanduser("~/.claude")]
+    roots = [os.environ.get("CLAUDE_CONFIG_DIR"), os.path.expanduser("~/.claude")]
     profiles = os.path.expanduser("~/.claude/.profiles")
     try:
         roots.extend(entry.path for entry in os.scandir(profiles) if entry.is_dir())

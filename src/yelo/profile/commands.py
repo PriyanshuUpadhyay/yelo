@@ -1,4 +1,4 @@
-"""argparse wiring for the `profile` group.
+"""argparse wiring for the `profile` group, including create and Claude mirror sync.
 
 The parser is the reference script's (agent-profiles.py:754-781) with `create` added and
 the two flags the shell wrappers used to supply themselves: `sessions --cwd` replaces the
@@ -7,7 +7,7 @@ implicit process directory the zsh helper relied on.
 
 import os
 
-from . import core, create
+from . import core, create, mirror
 from ..usage import snapshot
 
 CLI_CHOICES = ("claude", "codex")
@@ -45,6 +45,20 @@ def command_sessions(args):
 
             return fail("profile sessions", str(error), args.cwd)
     return core.command_sessions(args)
+
+
+def command_sync(args):
+    rows = core.rows_for("claude")
+    try:
+        drift = [path for row in rows for path in mirror.sync(row["name"], core.HOME)]
+    except OSError as error:
+        from ..cli import fail
+
+        return fail("profile sync", str(error))
+    print(f"synced {len(rows)} Claude profiles")
+    for path in drift:
+        print(f"drift\t{path}")
+    return 1 if drift else 0
 
 
 def register(subparsers):
@@ -95,6 +109,9 @@ def register(subparsers):
     # A valueless --email keeps the shell's own "requires an address" refusal.
     creating.add_argument("--email", nargs="?", const="", default=None)
     creating.add_argument("--yes", "-y", action="store_true")
+    syncing = group.add_parser("sync")
+    syncing.add_argument("--cli", choices=("claude",), required=True)
+    syncing.set_defaults(handler=command_sync)
 
     parser.set_defaults(run=run)
     return parser

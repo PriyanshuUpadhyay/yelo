@@ -18,7 +18,7 @@ import os
 import shutil
 import sys
 
-from . import core
+from . import core, mirror
 from .. import launchers
 
 # The label the messages carry, which is the command the user typed, not the --cli value.
@@ -124,6 +124,7 @@ def write_claude(name, directory, home, email):
     if email:
         with open(os.path.join(directory, "email"), "w", encoding="utf-8") as handle:
             handle.write(email + "\n")
+    mirror.sync(name, home)
     return f"Created profile '{name}'. Sign in with: claude-{name} auth login"
 
 

@@ -39,6 +39,8 @@ def test_create_each_cli(yelo):
     directory = home / ".claude" / ".profiles" / "zed"
     assert mode(directory) == 0o700
     assert (directory / "email").read_text() == "zed@example.test\n"
+    assert (directory / ".claude.json").read_text() == "{}\n"
+    assert mode(directory / ".claude.json") == 0o600
 
     result = yelo("profile", "create", "--cli", "codex", "zeta", "--yes")
     assert result.returncode == 0, result.stderr

@@ -1689,9 +1689,9 @@ class DispatchOnceTests(unittest.TestCase):
         cwd = "/private/tmp/project/.herdr/workers"
         hidden = []
         original_classifier = handoff._run_claude_classifier
-        original_profile = os.environ.get("CLAUDE_PROFILE_DIR")
+        original_profile = os.environ.get("CLAUDE_CONFIG_DIR")
         with tempfile.TemporaryDirectory() as profile:
-            os.environ["CLAUDE_PROFILE_DIR"] = profile
+            os.environ["CLAUDE_CONFIG_DIR"] = profile
             project = re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(cwd))
             transcript = os.path.join(profile, "projects", project, session_id + ".jsonl")
             os.makedirs(os.path.dirname(transcript))
@@ -1706,9 +1706,9 @@ class DispatchOnceTests(unittest.TestCase):
             finally:
                 handoff._run_claude_classifier = original_classifier
                 if original_profile is None:
-                    os.environ.pop("CLAUDE_PROFILE_DIR", None)
+                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
                 else:
-                    os.environ["CLAUDE_PROFILE_DIR"] = original_profile
+                    os.environ["CLAUDE_CONFIG_DIR"] = original_profile
         self.assertEqual(result["outcome"], handoff.LANDED_WORKING)
         self.assertEqual(hidden, [(os.path.realpath(transcript), session_id,
                                    os.path.realpath(os.path.join(profile, "projects")))])

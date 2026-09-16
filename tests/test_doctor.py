@@ -144,7 +144,7 @@ STATES = (
 @pytest.mark.parametrize("arrange", STATES, ids=[fn.__name__[6:] for fn in STATES])
 def test_doctor_matrix(bench, arrange):
     install_hud_targets(bench)
-    expected = {**arrange(bench), "usage": "ok", "hud": "ok"}
+    expected = {**arrange(bench), "profile-mirrors": "ok", "usage": "ok", "hud": "ok"}
     before = bench.digest()
 
     result = bench.run("doctor")
@@ -178,6 +178,25 @@ def test_doctor_never_creates_the_launcher_directory(bench):
     result = bench.run("doctor")
     assert result.returncode == 1
     assert not bench.launchers.exists()
+
+
+def test_doctor_reports_profile_mirror_drift_without_repairing_it(bench):
+    seed_accounts(bench)
+    (bench.home / ".claude" / "projects").mkdir()
+    assert bench.run("setup").returncode == 0
+    drift = bench.profiles / "pri" / "projects"
+    drift.unlink()
+    drift.mkdir()
+    config = bench.profiles / "work" / ".claude.json"
+    config.unlink()
+    before = bench.digest()
+
+    result = bench.run("doctor")
+
+    assert verdicts(result)["profile-mirrors"] == "missing"
+    assert f"drift: {drift}" in result.stdout
+    assert f"missing: {config}" in result.stdout
+    assert bench.digest() == before
 
 
 # --- matrix M4: the usage and hud rows through the cutover --------------------------------

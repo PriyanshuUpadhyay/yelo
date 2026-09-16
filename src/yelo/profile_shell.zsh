@@ -167,7 +167,7 @@ _cprofile() {
       fi
     fi
   fi
-  if [ -z "$resolved" ] && [[ -n "${CLAUDE_PROFILE_DIR:-}${CLAUDE_CONFIG_DIR:-}" ]]; then
+  if [ -z "$resolved" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
     _claude_binary "${args[@]}"
     return
   fi
@@ -215,7 +215,7 @@ _cprofile() {
   # Every profile names its Keychain identity by path string; the path need not exist. No
   # account rides the bare default service, so no rename can silently swap one account's
   # credentials for another's.
-  AGENT_PROFILE_LABEL="$profile" CLAUDE_PROFILE_DIR="$profile_dir" \
+  AGENT_PROFILE_LABEL="$profile" CLAUDE_CONFIG_DIR="$profile_dir" \
     CLAUDE_SECURESTORAGE_CONFIG_DIR="$HOME/.claude-$profile" \
     _claude_binary "${args[@]}"
 }

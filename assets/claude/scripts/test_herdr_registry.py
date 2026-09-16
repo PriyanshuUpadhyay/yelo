@@ -939,7 +939,7 @@ class SpawnTest(WatcherFixture):
                          [*CLAUDE_ROUTE_FLAGS, "--permission-mode", "acceptEdits"])
         environment = self.worker_environment()
         self.assertEqual(environment["AGENT_PROFILE_LABEL"], PROFILE)
-        self.assertTrue(environment["CLAUDE_PROFILE_DIR"].endswith("/.profiles/" + PROFILE))
+        self.assertTrue(environment["CLAUDE_CONFIG_DIR"].endswith("/.profiles/" + PROFILE))
 
     def test_a_repeated_idempotency_key_never_produces_a_second_pane(self):
         self.drop()

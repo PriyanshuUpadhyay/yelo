@@ -7,7 +7,7 @@ by a symlink the test made rather than by whatever this machine happens to have.
 `bench` fixture, `SEEDED_SETTINGS`, and `tree_digest` live in conftest.py, because the
 Herdr and Prime install suites need exactly the same bench.
 
-Two steps install profile roots, named launchers, and the independent shell integration.
+Three steps install profile roots, profile mirrors, named launchers, and shell integration.
 """
 
 import json
@@ -55,7 +55,8 @@ def test_setup_idempotent(bench):
     seed_accounts(bench)
     first = bench.run("setup")
     assert first.returncode == 0, first.stderr
-    assert bench.rows(first) == {"launchers": "changed", "profiles": "unchanged"}
+    assert bench.rows(first) == {
+        "launchers": "changed", "profiles": "unchanged", "profile-mirrors": "changed"}
 
     written = {path.name for path in bench.launchers.iterdir()}
     assert written == ACCOUNTS
@@ -67,7 +68,8 @@ def test_setup_idempotent(bench):
     before = bench.digest()
     second = bench.run("setup")
     assert second.returncode == 0, second.stderr
-    assert bench.rows(second) == {"launchers": "unchanged", "profiles": "unchanged"}
+    assert bench.rows(second) == {
+        "launchers": "unchanged", "profiles": "unchanged", "profile-mirrors": "unchanged"}
     assert bench.digest() == before
 
 
@@ -81,7 +83,7 @@ def test_a_launcher_carries_the_accounts_environment(bench):
     assert lines[1] == "# written by yelo setup launchers: account pri"
     profile = os.path.join(str(bench.home), ".claude", ".profiles", "pri")
     assert lines[2] == (
-        f"exec env AGENT_PROFILE_LABEL=pri CLAUDE_PROFILE_DIR={profile} "
+        f"exec env AGENT_PROFILE_LABEL=pri CLAUDE_CONFIG_DIR={profile} "
         f"CLAUDE_SECURESTORAGE_CONFIG_DIR={bench.home}/.claude-pri claude \"$@\"")
 
     directory = os.path.join(str(bench.home), ".codex-alt")
@@ -99,7 +101,7 @@ def test_launchers_work_without_yelo_on_path(bench, tmp_path, cli, account):
     vendor = tmp_path / "vendor"
     vendor.mkdir()
     (vendor / cli).write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"$CLAUDE_PROFILE_DIR\" \"$CODEX_HOME\" "
+        "#!/bin/sh\nprintf '%s\\n' \"$CLAUDE_CONFIG_DIR\" \"$CODEX_HOME\" "
         "\"$@\"\nexit 23\n")
     (vendor / cli).chmod(0o755)
     # There is no Python interpreter, Yelo package, or yelo-agent in this PATH.
@@ -304,7 +306,7 @@ def test_setup_json_output(bench):
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert [row["step"] for row in report] == list(setup.STEP_NAMES) == \
-        ["launchers", "profiles"]
+        ["launchers", "profiles", "profile-mirrors"]
 
 
 def test_every_account_core_reports_gets_a_launcher(bench):
