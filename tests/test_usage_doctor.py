@@ -103,8 +103,8 @@ def test_doctor_matrix(bench, capsys):
     some = doctor(bench)
     assert some.returncode == 0, some.stderr
     assert "PASS: no row without usable data carries a pct" in some.stdout
-    assert "PASS: cx·api 7d: current from api" in some.stdout
-    assert "WARN: cx·rollout 7d: stale data from rollout" in some.stdout
+    assert "PASS: cx·api@example.test 7d: current from api" in some.stdout
+    assert "WARN: cx·rollout@example.test 7d: stale data from rollout" in some.stdout
     assert "row(s) without usable data carry a pct" not in some.stdout
     assert "WARN: 1 of 2 row(s) stale" in some.stdout
 

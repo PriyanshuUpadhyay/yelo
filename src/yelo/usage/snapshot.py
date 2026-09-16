@@ -5,9 +5,10 @@ ported as text, so every judgment below keeps the reference's name and the refer
 rule, and `tests/golden/usage-show.json` is rendered from the reference itself so the two
 are compared rather than trusted.
 
-Reads cache files and codex rollouts only. No network, no Keychain, no subprocess, and no
-write of any kind (law L4). Accounts come from `yelo.profile.core` (law L2); the only
-directory this module lists is one codex home's own `sessions/` tree.
+Reads local profile identity files, cache files, and codex rollouts only. No network, no
+Keychain, no subprocess, and no write of any kind (law L4). Accounts come from
+`yelo.profile.core` (law L2); the only directory this module lists is one codex home's own
+`sessions/` tree.
 
 USAGE_HUD_STALE_AFTER (default 900) is the reference's freshness gate, kept by name.
 """
@@ -462,8 +463,8 @@ def snapshot_rows(home, now=None):
     providers = fetch.capabilities()
     claude_fetch, codex_fetch = "claude" in providers, "codex" in providers
 
-    claude = core.claude_rows(include_identity=False)
-    codex = core.codex_rows(include_identity=False)
+    claude = core.claude_rows()
+    codex = core.codex_rows()
     active = active_index(claude)
     rows = []
     for index, row in enumerate(claude):

@@ -51,6 +51,34 @@ class ParseResetHours(unittest.TestCase):
             self.assertIsNone(agent_profiles.parse_reset_hours(text))
 
 
+class HudIdentity(unittest.TestCase):
+    def test_hud_label_prefers_email_and_falls_back_to_name(self):
+        self.assertEqual(agent_profiles.hud_label(
+            "claude", {"name": "pri", "email": "person@example.test"}),
+            "cl·person@example.test")
+        self.assertEqual(agent_profiles.hud_label("claude", {"name": "pri"}), "cl·pri")
+        self.assertEqual(agent_profiles.hud_label(
+            "codex", {"name": "work", "email": "person@example.test"}),
+            "cx·person@example.test")
+        self.assertEqual(agent_profiles.hud_label("codex", {"name": "work"}), "cx·work")
+        self.assertEqual(agent_profiles.hud_label("codex", {}), "cx")
+        self.assertEqual(agent_profiles.usage_data_labels(
+            "claude", {"name": "pri", "email": "person@example.test"}),
+            ["cl·person@example.test", "cl·pri"])
+
+    def test_claude_email_prefers_login_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pathlib.Path(directory, "email").write_text("before@example.test\n")
+            pathlib.Path(directory, ".claude.json").write_text(json.dumps({
+                "oauthAccount": {"emailAddress": "login@example.test"},
+            }))
+            self.assertEqual(agent_profiles.claude_email(directory), "login@example.test")
+            pathlib.Path(directory, ".claude.json").write_text('{"oauthAccount": null}')
+            self.assertEqual(agent_profiles.claude_email(directory), "before@example.test")
+            pathlib.Path(directory, "email").unlink()
+            self.assertIsNone(agent_profiles.claude_email(directory))
+
+
 class Urgency(unittest.TestCase):
     def test_fresh_full_window_scores_one(self):
         self.assertAlmostEqual(agent_profiles.urgency({"5h": (0.0, 5.0)}), 1.0)
