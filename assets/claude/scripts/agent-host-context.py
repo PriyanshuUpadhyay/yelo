@@ -11,14 +11,16 @@ import sys
 HERDR_CONTEXT = """[agent-host: herdr]
 This session is running inside Herdr. The top-level session is the orchestrator.
 - Every worker must be a visible foreground pane split from HERDR_PANE_ID.
-- Use `agent-teammate <claude|codex|agy> <unique-name> --role ROLE --cwd "$PWD" -- [extra agent flags]`; it resolves model/effort and calls `herdr pane split` plus `herdr agent start`.
+- Set `SWARM_ADAPTER=herdr`. Open one session per run with `swarm session new lane`, export `SWARM_SESSION_ID` and `SWARM_AGENT_ID=orchestrator`, then `swarm agent add orchestrator orchestrator`.
+- Spawn with `python3 ~/.claude/scripts/swarm-spawn-role.py <claude|codex|agy> <unique-name> --role ROLE --cwd "$PWD" -- [extra agent flags]`; it resolves model/effort and calls `swarm spawn`.
+- Send work with `swarm send <name> ask`; a reply arrives as the prompt `swarm: new message`, then `swarm inbox`, read, `swarm ack`. Close with `swarm close <name>`.
 - Do not use provider-native subagents, headless CLIs, detached processes, or background workers.
-- For non-trivial pane lifecycle work, load `~/.claude/skills/herdr-ops/SKILL.md`.
+- For pane lifecycle detail, load `~/.claude/skills/orchestrate-claude/references/host-swarm.md`.
 - Workers are leaves: answer only, do not orchestrate, spawn descendants, or notify the user."""
 
 HERDR_WORKER_CONTEXT = """[agent-host: herdr — worker]
 This session is a worker pane, a child of the orchestrator session. Act only on the task you were assigned.
-- Never spawn visible panes: `agent-teammate` and every `herdr` surface-creating command (`pane split`, `pane run`, `agent start`, `tab create`, `workspace create`, `worktree create`) are orchestrator-only and are refused for worker sessions.
+- Never spawn visible panes: `agent-teammate`, `swarm-spawn-role`, `swarm spawn` and every `herdr` surface-creating command (`pane split`, `pane run`, `agent start`, `tab create`, `workspace create`, `worktree create`) are orchestrator-only and are refused for worker sessions.
 - Remain a leaf: no provider-native subagents, workflow fan-out, headless one-shots, review rounds, or multi-agent pipelines.
 - Report results to the orchestrator only; do not notify the user."""
 
@@ -28,15 +30,15 @@ CODEX_HERDR_DELEGATION = """- `spawn_agent`, `wait_agent` and the rest of the co
 
 # Probe delta, for a session with NO drop box only. A provisioned session already knows its
 # spawn path, and telling it to probe would manufacture the denial HL-051 exists to remove.
-CODEX_SOCKET_PROBE = """- The `agent-teammate` line above states the general contract; these two cases resolve it for you and supersede it. Settle your spawn path ONCE, by testing the control socket with a single `herdr status`, then stay on the answer:
-  - `herdr status` answers → you are the unsandboxed driver. Spawn with `python3 ~/.claude/scripts/agent-teammate.py <family> <unique-name> --role ROLE --cwd "$PWD" -- [extra agent flags]`; the bare `agent-teammate` is a zsh function and does not exist in a non-interactive shell.
+CODEX_SOCKET_PROBE = """- The `swarm-spawn-role.py` line above states the general contract; these two cases resolve it for you and supersede it. Settle your spawn path ONCE, by testing the control socket with a single `herdr status`, then stay on the answer:
+  - `herdr status` answers → you are the unsandboxed driver. Spawn with `python3 ~/.claude/scripts/swarm-spawn-role.py <family> <unique-name> --role ROLE --cwd "$PWD" -- [extra agent flags]`; the bare `swarm-spawn-role.py` is not available in a non-interactive shell.
   - `herdr status` answers `PermissionDenied` → your sandbox denies that socket, so every direct `agent-teammate.py` or `herdr` call is denied for the same reason, and no drop box is provisioned for this session. You have no spawn path: report that and stop. Do not retry the call, and do not request an escalated sandbox to force one through — escalation spends a user approval on a path this session is not meant to use."""
 
 # Registry delta: a sandboxed root obeys the clause above and then finds `agent-teammate`
 # unusable, because the sandbox denies connect(2) to Herdr's control socket. Without a second
 # path it either stalls or reaches back for the native tools, so the contract has to name the
 # one primitive it still has — a file rename into the drop box.
-CODEX_REGISTRY_DELEGATION = """- Your spawn path is settled and supersedes the `agent-teammate` line above: this session has a registry drop box. Do not probe for an alternative — no `herdr status`, no `agent-teammate.py`, no other `herdr` command. This sandbox denies Herdr's control socket by design, so those calls only produce a denial, and an escalated sandbox is never the remedy for one.
+CODEX_REGISTRY_DELEGATION = """- Your spawn path is settled and supersedes the `swarm-spawn-role.py` line above: this session has a registry drop box. Do not probe for an alternative — no `herdr status`, no `agent-teammate.py`, no other `herdr` command. This sandbox denies Herdr's control socket by design, so those calls only produce a denial, and an escalated sandbox is never the remedy for one.
 - The drop box is already provisioned at {root}, and your environment carries the capability it needs:
   `python3 ~/.claude/scripts/herdr-registry.py request <family> <worker-name> --key <idempotency-key> --cwd "$PWD" --wait 120`
   A host-side watcher outside your sandbox performs the real pane split, so the worker is a visible pane exactly as `agent-teammate` would have produced.

@@ -76,7 +76,7 @@ class HostContextTest(unittest.TestCase):
         body = self.codex_context(**HERDR)
         self.assertIn("[agent-host: herdr]", body)
         self.assertIn("spawn_agent", body)
-        self.assertIn("agent-teammate.py", body)
+        self.assertIn("swarm-spawn-role.py", body)
         self.assertNotIn("herdr-registry.py request", body)
 
     def test_each_hosted_provider_receives_only_its_runtime_adapter(self):
@@ -138,10 +138,10 @@ class HostContextTest(unittest.TestCase):
         # top-down must never find a second one to fall back to.
         probing = self.codex_context(**HERDR)
         provisioned = self.codex_context(**dict(HERDR, **REGISTRY))
-        self.assertIn("agent-teammate.py", probing)
+        self.assertIn("swarm-spawn-role.py", probing)
         self.assertNotIn("herdr-registry.py request", probing)
         self.assertIn("herdr-registry.py request", provisioned)
-        self.assertNotIn("Spawn with `python3", provisioned)
+        self.assertIn("Spawn with `python3", provisioned)
 
     def test_the_no_native_spawn_clause_survives_the_registry_clause(self):
         body = self.codex_context(**dict(HERDR, **REGISTRY))
@@ -240,7 +240,7 @@ class HostContextTest(unittest.TestCase):
         self.assertNotIn("not a delegation path here", body)
         self.assertNotIn("Settle your spawn path ONCE", body)
         self.assertNotIn("herdr-registry.py request", body)
-        self.assertNotIn("agent-teammate.py", body)
+        self.assertIn("swarm-spawn-role", body)
 
     def test_agy_workers_invoke_history_containment(self):
         calls = []

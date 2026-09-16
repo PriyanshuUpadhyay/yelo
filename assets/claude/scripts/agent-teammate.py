@@ -443,6 +443,13 @@ def resolve_role(role, provider, agent_args):
     return route, [*flags, *agent_args]
 
 
+def prepare_agy_worker(agent_args):
+    """Make an initial positional prompt explicit while preserving a prompt-free TUI."""
+    if agent_args and not agent_args[0].startswith("-"):
+        return ["-i", *agent_args]
+    return agent_args
+
+
 def prepare_claude_worker(args):
     """Keep worker transcripts out of the caller's /resume picker.
 
@@ -670,6 +677,8 @@ def main():
     session_id = None
     try:
         check_env(args.env)
+        if args.provider == "agy":
+            args.agent_args = prepare_agy_worker(args.agent_args)
         route = None
         if args.role:
             route, args.agent_args = resolve_role(args.role, args.provider, args.agent_args)
