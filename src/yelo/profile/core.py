@@ -112,15 +112,14 @@ def alias_map(root):
 
 
 def claude_email(directory):
-    email = first_line(os.path.join(directory, "email"))
-    if email:
-        return email
     config = read_json(os.path.join(directory, ".claude.json"))
     if isinstance(config, dict):
         account = config.get("oauthAccount")
         if isinstance(account, dict):
-            return account.get("emailAddress") or None
-    return None
+            email = account.get("emailAddress")
+            if email:
+                return email
+    return first_line(os.path.join(directory, "email")) or None
 
 
 def claude_rows(*, include_identity=True):
@@ -352,13 +351,12 @@ def keychain_service(name):
 
 
 def hud_label(cli, row):
-    """The Usage HUD's label for one account: `cl·NAME`, `cx`, or `cx·NAME`. The codex base
-    home names itself through profile-label, and reports as the anonymous `cx` until it has
-    one."""
+    """The Usage HUD's label for one account. Prefer its email; use the profile name when
+    no email is known, and keep the anonymous `cx` for a nameless codex base home."""
+    identity = row.get("email") or row.get("name")
     if cli == "claude":
-        return f"cl·{row['name']}"
-    name = row.get("name")
-    return f"cx·{name}" if name else "cx"
+        return f"cl·{identity}"
+    return f"cx·{identity}" if identity else "cx"
 
 
 def claude_signed_in(name):
@@ -388,13 +386,16 @@ def add_signed_in(cli, rows):
 
 
 def usage_data_labels(cli, row):
-    if cli == "claude":
-        name = row.get("name")
-        return [f"cl·{name}"] if name else []
+    """Current HUD label first, then old name labels for older snapshots."""
     name = row.get("name")
+    labels = [hud_label(cli, row)] if row.get("email") or name or cli == "codex" else []
+    legacy = f"{'cl' if cli == 'claude' else 'cx'}·{name}" if name else None
+    if legacy and legacy not in labels:
+        labels.append(legacy)
+    if cli == "claude":
+        return labels
     directory = row.get("dir")
-    labels = [f"cx·{name}"] if name else []
-    if directory and os.path.basename(directory) == CODEX_BASE:
+    if directory and os.path.basename(directory) == CODEX_BASE and "cx" not in labels:
         labels.append("cx")
     return labels
 

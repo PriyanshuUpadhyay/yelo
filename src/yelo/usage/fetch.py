@@ -70,8 +70,8 @@ def codex_bin():
 # --- read-only answers the rest of the group asks for ----------------------------------
 
 def profiles():
-    """(name, cache dir, identity dir) per claude profile, in census order."""
-    return [(row["name"], row["dir"], os.path.join(core.HOME, ".claude-" + row["name"]))
+    """(name, cache dir, email) per claude profile, in census order."""
+    return [(row["name"], row["dir"], row["email"])
             for row in core.claude_rows()]
 
 
@@ -309,7 +309,7 @@ def write_cache(path, document):
 
 # --- one account -----------------------------------------------------------------------
 
-def fetch_claude(name, directory, identity):
+def fetch_claude(name, directory, _email):
     """(status word, succeeded). `fable-write-failed` counts as a success: the base cache
     already landed, so the run is not a failure, but the status line says the fable cache
     stayed stale rather than reporting a clean `ok`."""
@@ -381,8 +381,9 @@ def run(args):
     """Every account concurrently, one status line each in census order, exit 0 unless
     every account failed."""
     del args
-    jobs = [(core.hud_label("claude", {"name": name}), fetch_claude, (name, directory, identity))
-            for name, directory, identity in profiles()]
+    jobs = [(core.hud_label("claude", {"name": name, "email": email}),
+             fetch_claude, (name, directory, email))
+            for name, directory, email in profiles()]
     jobs += [(core.hud_label("codex", row), fetch_codex, (core.hud_label("codex", row), row["dir"]))
              for row in core.codex_rows()]
     if not jobs:

@@ -159,10 +159,10 @@ def test_window_scopes(tmp_path):
     })
     rows = {(row["label"], row.get("window")): row for row in show_rows(home)}
     # The fable cache alone carried every window: it may feed 5h and fb, never 7d.
-    assert rows[("cl·pri", "5h")]["pct"] == 77
-    assert rows[("cl·pri", "fb")]["pct"] == 9
-    assert rows[("cl·pri", "7d")]["state"] == "missing"
-    assert "pct" not in rows[("cl·pri", "7d")]
+    assert rows[("cl·a@example.test", "5h")]["pct"] == 77
+    assert rows[("cl·a@example.test", "fb")]["pct"] == 9
+    assert rows[("cl·a@example.test", "7d")]["state"] == "missing"
+    assert "pct" not in rows[("cl·a@example.test", "7d")]
 
 
 # --- C03 -------------------------------------------------------------------------------
@@ -189,7 +189,7 @@ def test_row_states(tmp_path):
 
     os.unlink(os.path.join(directory, ".usage-cache.json"))
     offline = show_rows(home)
-    assert offline == [{"label": "cl·pri", "provider": "claude", "state": "offline",
+    assert offline == [{"label": "cl·a@example.test", "provider": "claude", "state": "offline",
                         "reason": "no data", "canFetch": True}]
 
     logged_out = rows_of(run_yelo(["usage", "show", "--json"], fixture_env(home)))
@@ -339,7 +339,7 @@ def test_unreadable_cache_and_error_shape(tmp_path):
     assert set(rows["7d"]) == {"label", "provider", "window", "state", "active", "canFetch"}
 
     os.unlink(os.path.join(directory, ".usage-cache.json"))
-    assert show_rows(home) == [{"label": "cl·pri", "provider": "claude",
+    assert show_rows(home) == [{"label": "cl·a@example.test", "provider": "claude",
                                     "state": "offline", "reason": "no data",
                                     "canFetch": True}]
 

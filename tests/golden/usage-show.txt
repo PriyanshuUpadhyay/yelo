@@ -1,7 +1,7 @@
-LABEL    WINDOW  PCT  RESET  STATE    SOURCE
-cl·pri   5h      43%  21m    ok       statusline
-cl·pri   7d      12%  3d1h   ok       api
-cl·pri   fb      5%   3d1h   ok       api
-cl·work  -       -    -      offline  -
-cx       7d      30%  1d2h   ok       api
-cx·alt   7d      18%  1d2h   ok       rollout
+LABEL                 WINDOW  PCT  RESET  STATE    SOURCE
+cl·pri@example.test   5h      43%  21m    ok       statusline
+cl·pri@example.test   7d      12%  3d1h   ok       api
+cl·pri@example.test   fb      5%   3d1h   ok       api
+cl·work@example.test  -       -    -      offline  -
+cx·base@example.test  7d      30%  1d2h   ok       api
+cx·alt@example.test   7d      18%  1d2h   ok       rollout

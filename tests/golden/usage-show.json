@@ -1,6 +1,6 @@
 [
   {
-    "label": "cl·pri",
+    "label": "cl·pri@example.test",
     "provider": "claude",
     "window": "5h",
     "state": "ok",
@@ -13,7 +13,7 @@
     "canFetch": true
   },
   {
-    "label": "cl·pri",
+    "label": "cl·pri@example.test",
     "provider": "claude",
     "window": "7d",
     "state": "ok",
@@ -26,7 +26,7 @@
     "canFetch": true
   },
   {
-    "label": "cl·pri",
+    "label": "cl·pri@example.test",
     "provider": "claude",
     "window": "fb",
     "state": "ok",
@@ -39,14 +39,14 @@
     "canFetch": true
   },
   {
-    "label": "cl·work",
+    "label": "cl·work@example.test",
     "provider": "claude",
     "state": "offline",
     "reason": "no data",
     "canFetch": true
   },
   {
-    "label": "cx",
+    "label": "cx·base@example.test",
     "provider": "codex",
     "window": "7d",
     "state": "ok",
@@ -58,7 +58,7 @@
     "canFetch": false
   },
   {
-    "label": "cx·alt",
+    "label": "cx·alt@example.test",
     "provider": "codex",
     "window": "7d",
     "state": "ok",

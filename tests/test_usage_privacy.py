@@ -1,27 +1,23 @@
-"""Passive HUD reads cannot start programs or read credentials."""
-import pathlib
+"""Passive HUD reads cannot start programs or access the Keychain."""
 
 from conftest import build_usage_home
 from yelo.profile import core
 from yelo.usage import snapshot
 
 
-def test_snapshot_reads_usage_without_credentials_or_subprocesses(tmp_path, monkeypatch):
+def test_snapshot_reads_local_identity_without_subprocesses(tmp_path, monkeypatch):
     home = build_usage_home(tmp_path / "home", 1_900_000_000)
     monkeypatch.setattr(core, "HOME", str(home))
-    original_read = core.read_json
-    def usage_only(path):
-        path = pathlib.Path(path)
-        assert path.name not in {"auth.json", ".claude.json"}
-        assert ".prime" not in path.parts
-        return original_read(path)
-    monkeypatch.setattr(core, "read_json", usage_only)
     def forbidden(*args, **kwargs):
         raise AssertionError("The HUD must not start a subprocess or read the Keychain")
     monkeypatch.setattr(core.subprocess, "run", forbidden)
     monkeypatch.setattr(core.subprocess, "Popen", forbidden)
     rows = snapshot.snapshot_rows(str(home), now=1_900_000_000)
     assert {row["provider"] for row in rows} == {"claude", "codex"}
+    assert {row["label"] for row in rows} == {
+        "cl·pri@example.test", "cl·work@example.test",
+        "cx·base@example.test", "cx·alt@example.test",
+    }
     assert any(row.get("pct") == 43 for row in rows)
     assert all("primeSignedIn" not in row for row in rows)
 
