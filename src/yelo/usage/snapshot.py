@@ -475,6 +475,6 @@ def snapshot_rows(home, now=None):
                                 None, flag, claude_fetch,
                                 now, limit))
     for row in codex:
-        rows.extend(codex_rows(row, core.hud_label("codex", row), row.get("signed_in"),
+        rows.extend(codex_rows(row, core.hud_label("codex", row), None,
                                codex_fetch, now, limit))
     return rows
