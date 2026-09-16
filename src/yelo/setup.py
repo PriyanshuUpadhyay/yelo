@@ -1,11 +1,12 @@
 """`yelo setup [step ...]`: install profiles and shell integration, idempotently.
 
-Two setup steps:
+Three setup steps:
 
   launchers  standalone zsh integration and selector, plus one executable per account under ~/.local/bin -- `claude-sid`, `codex-thine`,
              each three lines that exec the vendor binary with that
              account's environment. See yelo.launchers.
   profiles   ~/.claude/.profiles, mode 700.
+  profile-mirrors  shared Claude state linked into each account config directory.
 
 Every step answers two questions with the same code: `apply(home)` makes the target so and
 says whether it changed, `check(home)` re-derives the verdict from the filesystem alone and
@@ -22,6 +23,7 @@ import json
 import os
 
 from . import launchers
+from .profile import core, mirror
 
 PROFILES_RELATIVE = os.path.join(".claude", ".profiles")
 OK, MISSING, OWNED = "ok", "missing", "owned-by-dotfiles"
@@ -102,9 +104,30 @@ def check_profiles(home):
     return MISSING, f"absent: {path}"
 
 
+def apply_profile_mirrors(home):
+    rows = core.rows_for("claude")
+    before = {issue for row in rows for issue in mirror.issues(row["name"], home)}
+    for row in rows:
+        mirror.sync(row["name"], home)
+    after = {issue for row in rows for issue in mirror.issues(row["name"], home)}
+    detail = f"{len(rows)} Claude profile mirrors"
+    if after:
+        detail += "; " + "; ".join(f"{kind}: {path}" for kind, path in sorted(after))
+    return (CHANGED if before != after else UNCHANGED), detail
+
+
+def check_profile_mirrors(home):
+    rows = core.rows_for("claude")
+    found = [issue for row in rows for issue in mirror.issues(row["name"], home)]
+    if found:
+        return MISSING, "; ".join(f"{kind}: {path}" for kind, path in found)
+    return OK, f"{len(rows)} Claude profile mirrors under {profiles_path(home)}"
+
+
 STEPS = (
     Step("launchers", launchers.apply_launchers, launchers.check_launchers),
     Step("profiles", apply_profiles, check_profiles),
+    Step("profile-mirrors", apply_profile_mirrors, check_profile_mirrors),
 )
 STEP_NAMES = tuple(step.name for step in STEPS)
 

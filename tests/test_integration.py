@@ -30,7 +30,7 @@ def installed(tmp_path, monkeypatch):
     for cli in ("claude", "codex"):
         path = binaries / cli
         path.write_text('''#!/bin/sh
-printf '%s\\n' "home=$CODEX_HOME" "claude=$CLAUDE_PROFILE_DIR" "identity=$CLAUDE_SECURESTORAGE_CONFIG_DIR"
+printf '%s\\n' "home=$CODEX_HOME" "claude=$CLAUDE_CONFIG_DIR" "identity=$CLAUDE_SECURESTORAGE_CONFIG_DIR"
 printf 'arg=%s\\n' "$@"
 exit 23
 ''')
@@ -117,7 +117,7 @@ def test_piped_menu_fails_without_starting_vendor(installed, cli):
     assert not result.stdout
 
 
-@pytest.mark.parametrize("cli,env_name", [("claude", "CLAUDE_PROFILE_DIR"), ("codex", "CODEX_HOME")])
+@pytest.mark.parametrize("cli,env_name", [("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")])
 def test_inherited_account_is_not_auto_switched(installed, cli, env_name):
     result = run(installed, cli, **{env_name: "/explicit/account"})
     assert result.returncode == 23, result.stderr

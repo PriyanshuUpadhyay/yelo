@@ -291,7 +291,7 @@ class AccountEnvTest(unittest.TestCase):
     def test_a_claude_pane_carries_the_callers_account(self):
         env, rest = self.account_env("claude", {"AGENT_PROFILE_LABEL": "sid"}, "--model", "x")
         self.assertEqual(env, ["AGENT_PROFILE_LABEL=sid",
-                               "CLAUDE_PROFILE_DIR=/h/.claude/.profiles/sid",
+                               "CLAUDE_CONFIG_DIR=/h/.claude/.profiles/sid",
                                "CLAUDE_SECURESTORAGE_CONFIG_DIR=/h/.claude-sid"])
         self.assertEqual(rest, ["--model", "x"], "only --profile is taken out")
 

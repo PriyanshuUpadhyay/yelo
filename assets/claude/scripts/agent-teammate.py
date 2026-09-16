@@ -356,7 +356,7 @@ def account_env(provider, agent_args):
             return []
         return [
             f"AGENT_PROFILE_LABEL={label}",
-            "CLAUDE_PROFILE_DIR=" + os.path.join(home, *CLAUDE_PROFILES, label),
+            "CLAUDE_CONFIG_DIR=" + os.path.join(home, *CLAUDE_PROFILES, label),
             "CLAUDE_SECURESTORAGE_CONFIG_DIR=" + os.path.join(home, ".claude-" + label),
         ]
     carried = [f"AGENT_PROFILE_LABEL={label}"] if label else []

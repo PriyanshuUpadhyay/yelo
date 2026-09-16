@@ -148,6 +148,7 @@ def build_fixture_home(home):
     """Two claude profiles, two codex homes, one prime home, with fixed bytes so the
     rendered tables are the same on every machine."""
     home = str(home)
+    write(os.path.join(home, ".claude.json"), '{"oauthAccount":null}\n')
     for name, email in FIXTURE_ACCOUNTS["claude"]:
         write(os.path.join(home, ".claude", ".profiles", name, "email"), email + "\n")
     for name, email, plan, account_id in FIXTURE_ACCOUNTS["codex"]:
@@ -278,6 +279,7 @@ def build_usage_home(home, now):
     with an API cache, and `alt` with a rollout only. No prime home, and no account whose
     label the census and the reference script would disagree about."""
     home = str(home)
+    write(os.path.join(home, ".claude.json"), '{"oauthAccount":null}\n')
     for name, email in USAGE_ACCOUNTS["claude"]:
         write(os.path.join(home, ".claude", ".profiles", name, "email"), email + "\n")
     profile = os.path.join(home, ".claude", ".profiles", "pri")

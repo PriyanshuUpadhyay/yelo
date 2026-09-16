@@ -5,7 +5,7 @@ These optional shortcuts bypass the account menu. Each is a file under
 
     #!/bin/sh
     # written by yelo setup launchers: account sid
-    exec env AGENT_PROFILE_LABEL=sid CLAUDE_PROFILE_DIR=... claude "$@"
+    exec env AGENT_PROFILE_LABEL=sid CLAUDE_CONFIG_DIR=... claude "$@"
 
 So `claude-sid` is a command, `codex-thine` is a command, and nothing of yelo runs when
 one starts. The vendor name is bare, so PATH answers at run time: a `claude` reinstalled
@@ -42,7 +42,7 @@ def environment(cli, name, directory, home):
     """Exactly what the removed wrappers exported before exec'ing the binary."""
     if cli == "claude":
         return [("AGENT_PROFILE_LABEL", name),
-                ("CLAUDE_PROFILE_DIR", directory),
+                ("CLAUDE_CONFIG_DIR", directory),
                 ("CLAUDE_SECURESTORAGE_CONFIG_DIR", os.path.join(home, f".claude-{name}"))]
     if cli == "codex":
         return [("CODEX_HOME", directory),
