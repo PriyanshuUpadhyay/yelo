@@ -100,7 +100,7 @@ def register(subparsers):
     resolving.add_argument("--json", action="store_true")
     picking = add("pick", command_pick)
     picking.add_argument("--json", action="store_true")
-    picking.add_argument("--model", help="Claude startup model")
+    picking.add_argument("--model", help="startup model; Codex falls back to each config.toml")
     creating = add("create", create.command_create)
     # The wrappers send `create --cli CLI [options] -- NAME`, so a name that starts with a
     # dash reaches create.py and gets the shell's invalid-name refusal. An absent name is

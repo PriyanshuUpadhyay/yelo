@@ -8,9 +8,10 @@ from .usage import snapshot
 
 
 def main():
-    if sys.argv[1:2] == ["model"]:
+    if sys.argv[1:2] in (["model"], ["codex-model"]):
+        read = core.claude_model if sys.argv[1] == "model" else core.codex_model
         try:
-            print(core.claude_model(sys.argv[2:]))
+            print(read(sys.argv[2:]))
         except core.ResolveError as error:
             print(str(error), file=sys.stderr)
             return error.code
