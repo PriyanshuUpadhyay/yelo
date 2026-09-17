@@ -152,3 +152,18 @@ def test_result_is_json(fake_codex, tmp_path):
     survive a round trip unchanged."""
     result = codex.fetch_rate_limits(fake_codex(ANSWERS), str(tmp_path), 2)
     assert json.loads(json.dumps(result)) == result
+
+
+def test_named_limits_keep_model_limits_and_drop_the_rest():
+    window = {"usedPercent": 5, "windowDurationMins": 300, "resetsAt": 4102444800}
+    named = codex.named_limits({
+        "codex": {"limitName": None, "primary": window},
+        "codex_bengalfox": {"limitName": "GPT-5.3-Codex-Spark", "primary": window, "secondary": None},
+        "premium": {"limitName": "Premium", "primary": None},
+        "broken": {"limitName": "Broken", "primary": {"usedPercent": 5}},
+    })
+    assert named == {"codex_bengalfox": {"limit_name": "GPT-5.3-Codex-Spark",
+                                         "primary": {"used_percent": 5, "window_minutes": 300,
+                                                     "resets_at": 4102444800},
+                                         "secondary": None}}
+    assert codex.named_limits(None) == {}

@@ -401,7 +401,9 @@ function codex {
         fi
         ;;
       *)
-        resolved="$(_yelo_profiles pick --cli codex)" || {
+        local startup_model
+        startup_model="$(_yelo_profiles codex-model "${args[@]}")" || return 2
+        resolved="$(_yelo_profiles pick --cli codex --model "$startup_model")" || {
           print -u2 "codex: no account could be picked; pass --profile NAME"
           return 2
         }

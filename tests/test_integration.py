@@ -267,6 +267,7 @@ def test_all_fable_exhausted_stops_before_vendor_launch(installed, single):
 def test_fable_reset_restores_eligibility(installed):
     home, _, _, _ = installed
     fable_cache(home, 'pri', 100, expired=True)
+    fable_cache(home, 'work', 100)
     result = run(installed, 'claude --model=fable')
     assert result.returncode == 23, result.stderr
     assert 'claude=' + str(home / '.claude/.profiles/pri') in result.stdout
@@ -299,3 +300,46 @@ def test_explicit_model_overrides_configured_fable(installed):
     result = run(installed, 'claude --model sonnet')
     assert result.returncode == 23, result.stderr
     assert 'claude=' + str(home / '.claude/.profiles/pri') in result.stdout
+
+
+def test_fable_ranks_by_the_fable_window_not_a_hot_session_window(installed):
+    home, _, _, _ = installed
+    profile = home / '.claude/.profiles/pri'
+    (profile / '.usage-cache.json').unlink()
+    now = int(time.time())
+    (profile / '.usage-api-cache.json').write_text(json.dumps({
+        "five_hour": {"used_percentage": 0, "resets_at": now + 300},
+        "seven_day": {"used_percentage": 10, "resets_at": now + 5 * 86400},
+        "ts": now, "fetched_at": now, "source": "api"}))
+    fable_cache(home, 'pri', 90)
+    fable_cache(home, 'work', 20, reset_seconds=3 * 86400)
+    result = run(installed, 'claude --model fable')
+    assert result.returncode == 23, result.stderr
+    assert 'claude=' + str(home / '.claude/.profiles/work') in result.stdout
+    result = run(installed, 'claude --model sonnet')
+    assert result.returncode == 23, result.stderr
+    assert 'claude=' + str(home / '.claude/.profiles/pri') in result.stdout
+
+
+@pytest.mark.parametrize("command,config,expected", [
+    ("codex", None, ".codex-alt"),
+    ("codex -m gpt-5.3-codex-spark", None, ".codex"),
+    ("codex exec --model=GPT-5.3-Codex-Spark hi", None, ".codex"),
+    ("codex -c 'model=\"gpt-5.3-codex-spark\"'", None, ".codex"),
+    ("codex", 'model = "gpt-5.3-codex-spark"\n', ".codex"),
+    ("codex -m gpt-6-astra", 'model = "gpt-5.3-codex-spark"\n', ".codex-alt"),
+])
+def test_codex_model_with_its_own_limit_picks_by_that_limit(installed, command, config, expected):
+    home, _, _, _ = installed
+    cache = home / '.codex/.usage-hud-api-cache.json'
+    document = json.loads(cache.read_text())
+    document["limits_by_id"] = {"codex_bengalfox": {
+        "limit_name": "GPT-5.3-Codex-Spark",
+        "primary": {"used_percent": 0, "window_minutes": 300, "resets_at": int(time.time()) + 600},
+        "secondary": None}}
+    cache.write_text(json.dumps(document))
+    if config:
+        (home / '.codex/config.toml').write_text(config)
+    result = run(installed, command)
+    assert result.returncode == 23, result.stderr
+    assert "home=" + str(home / expected) + "\n" in result.stdout

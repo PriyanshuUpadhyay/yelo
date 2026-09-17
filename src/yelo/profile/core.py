@@ -10,7 +10,7 @@ Subcommands (wired by yelo.profile.commands as `yelo profile ...`):
   list    --cli claude|codex [--usage] [--json]   all rows, aligned table or JSON
   menu    --cli claude|codex                      picker rows: index/name/dir/display (TAB)
   resolve --cli claude|codex QUERY [--json]       name<TAB>dir, or JSON
-  pick    --cli claude|codex [--json]             the account about to waste the most usage
+  pick    --cli claude|codex [--model M] [--json] the account about to waste the most usage
   sessions --cli codex [--all] [--limit N] [--json]     recent sessions, newest first, each
                                                         with the account that owns it
   owner   --cli codex [--json] (SESSION_ID | --last [--all])   name<TAB>dir of the account
@@ -36,6 +36,7 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 
 HOME = os.path.expanduser("~")
 KEYCHAIN_TIMEOUT_SECONDS = 10
@@ -473,6 +474,39 @@ def fable_model(model):
     return isinstance(model, str) and ("fable" in model.lower() or model.lower().split("[", 1)[0] == "best")
 
 
+def codex_model(args=()):
+    """The model a Codex command line names with -m/--model or -c model=..., else "" so each
+    account's own config.toml supplies the default. The last setting wins, as in Codex."""
+    model = ""
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            break
+        key, separator, value = arg.partition("=")
+        if key in ("-m", "--model", "-c", "--config"):
+            if not separator:
+                index += 1
+                value = args[index] if index < len(args) else ""
+            if key in ("-m", "--model"):
+                model = value
+            else:
+                name, assigned, raw = value.partition("=")
+                if assigned and name.strip() == "model":
+                    model = raw.strip().strip("\"'")
+        index += 1
+    return model
+
+
+def codex_config_model(directory):
+    try:
+        with open(os.path.join(directory, "config.toml"), "rb") as handle:
+            model = tomllib.load(handle).get("model")
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    return model if isinstance(model, str) else ""
+
+
 def usage_data_windows(cli, row, usage_data, include_fable=False):
     """(used percent, hours to reset) per window, from the first usage data label that has rows."""
     for label in usage_data_labels(cli, row):
@@ -543,9 +577,27 @@ def cache_windows(cli, row, include_fable=False):
                     windows["fb"] = (pct, hours_until(entry.get("resets_at"), "fb"))
         return windows or None
     cache = read_json(os.path.join(directory, ".usage-hud-api-cache.json"))
-    limits = cache.get("rate_limits") if isinstance(cache, dict) else None
+    return codex_windows(cache.get("rate_limits") if isinstance(cache, dict) else None)
+
+
+def codex_model_windows(row, model):
+    """A Codex model with its own limit is judged by that limit alone, matched by the limit's
+    name ("GPT-5.3-Codex-Spark" is gpt-5.3-codex-spark). Every other model spends the
+    account's shared limit, so this returns None for it."""
+    model = (model or codex_config_model(row["dir"])).lower() if row["dir"] else ""
+    cache = read_json(os.path.join(row["dir"], ".usage-hud-api-cache.json")) if model else None
+    limits = cache.get("limits_by_id") if isinstance(cache, dict) else None
+    for entry in (limits.values() if isinstance(limits, dict) else ()):
+        name = entry.get("limit_name") if isinstance(entry, dict) else None
+        if isinstance(name, str) and name.lower().replace(" ", "-") == model:
+            return codex_windows(entry)
+    return None
+
+
+def codex_windows(limits):
     if not isinstance(limits, dict):
         return None
+    windows = {}
     for entry in limits.values():
         if not isinstance(entry, dict):
             continue
@@ -573,10 +625,12 @@ def urgency(windows):
     return best
 
 
-def add_usage(cli, rows, usage_rows, include_fable=False):
+def add_usage(cli, rows, usage_rows, include_fable=False, model=None):
     """Adds `usage` (display text), `remaining` (min percent left, None = unknown), and
     `urgency` (see urgency(); None when remaining is unknown). With include_fable,
-    adds a hard exclusion flag from the model-specific API window, not statusline data.
+    adds a hard exclusion flag from the model-specific API window, not statusline data,
+    and ranks by the Fable window alone when it is known. A Codex model with its own limit
+    replaces the shared windows (see codex_model_windows).
 
     `usage_rows` is the Usage HUD snapshot the caller took (yelo.profile.commands reads it
     from yelo.usage.snapshot), or None when no snapshot could be taken at all — this
@@ -590,6 +644,8 @@ def add_usage(cli, rows, usage_rows, include_fable=False):
             cached = cache_windows(cli, row, True) or {}
             if "fb" in cached:
                 windows["fb"] = cached["fb"]
+        if cli == "codex":
+            windows = codex_model_windows(row, model) or windows
         if include_fable:
             row["fable_exhausted"] = bool(windows and "fb" in windows and windows["fb"][0] >= 100)
         if windows:
@@ -598,7 +654,8 @@ def add_usage(cli, rows, usage_rows, include_fable=False):
                 for window in ("5h", "7d", "fb") if window in windows
             )
             row["remaining"] = int(round(min(100 - used for used, _ in windows.values())))
-            row["urgency"] = round(urgency(windows), 3)
+            ranked = {"fb": windows["fb"]} if include_fable and "fb" in windows else windows
+            row["urgency"] = round(urgency(ranked), 3)
         elif usage_data is None:
             row["usage"] = "?"
             row["remaining"] = None
@@ -764,7 +821,9 @@ def pick(cli, usage_rows=None, model=None):
     with no usage rows yet counts as full, but an account nothing can be read for is not
     guessed at — with no judgeable candidate this fails instead of naming a default.
     A Fable startup model excludes known Fable-exhausted accounts even if all are exhausted
-    or only one is signed in. Missing model-specific data is not proof of exhaustion."""
+    or only one is signed in, and ranks the rest by their Fable window. Missing
+    model-specific data is not proof of exhaustion. For Codex, `model` is the command-line
+    model, and an empty one falls back to each account's config.toml."""
     rows = [row for row in add_signed_in(cli, rows_for(cli)) if row.get("signed_in")]
     if not rows:
         raise ResolveError(f"{cli}: no signed-in account to pick from", 1)
@@ -777,7 +836,7 @@ def pick(cli, usage_rows=None, model=None):
                                "wait for reset or choose another model with --model", 1)
     if len(rows) > 1:
         if not include_fable:
-            add_usage(cli, rows, usage_rows)
+            add_usage(cli, rows, usage_rows, model=model)
         judged = [row for row in rows if row.get("remaining") is not None]
         if not judged:
             raise ResolveError(f"{cli}: no usage data to pick an account from", 1)

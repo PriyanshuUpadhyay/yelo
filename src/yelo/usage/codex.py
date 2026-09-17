@@ -48,6 +48,22 @@ def normalize_window(value):
     }
 
 
+def named_limits(limits):
+    """Limits a model can own (GPT-5.3-Codex-Spark has its own); the unnamed default limit is
+    `rate_limits` already. A malformed entry is dropped so it cannot fail the whole fetch."""
+    named = {}
+    for limit_id, entry in (limits.items() if isinstance(limits, dict) else ()):
+        if not isinstance(entry, dict) or not isinstance(entry.get("limitName"), str):
+            continue
+        try:
+            primary, secondary = normalize_window(entry.get("primary")), normalize_window(entry.get("secondary"))
+        except ValueError:
+            continue
+        if primary is not None:
+            named[limit_id] = {"limit_name": entry["limitName"], "primary": primary, "secondary": secondary}
+    return named
+
+
 def terminate_process(process):
     if process.poll() is not None:
         return
@@ -141,6 +157,7 @@ def fetch_rate_limits(codex_bin, codex_home, timeout):
                     "primary": primary,
                     "secondary": normalize_window(rate_limits.get("secondary")),
                 },
+                "limits_by_id": named_limits(result.get("rateLimitsByLimitId")),
                 "fetched_at": int(time.time()),
                 "source": "api",
             }

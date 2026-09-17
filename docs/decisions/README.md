@@ -8,6 +8,7 @@ commit.
 
 | #    | Title                                              | Status   | Date       | Origin          |
 |------|----------------------------------------------------|----------|------------|-----------------|
+| 0015 | Pick the account by the launch model's own limit   | accepted | 2026-09-17 | yelo            |
 | 0014 | Use a mirrored Claude config directory per account | accepted | 2026-09-16 | jello           |
 | 0013 | Push worker wakes to the parent pane, publish owns the wake | accepted | 2026-09-09 | jello           |
 | 0012 | Keep Prime pane auto-resume armed                  | accepted | 2026-08-23 | dotfiles 8e56172|
