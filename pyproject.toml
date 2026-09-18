@@ -1,6 +1,6 @@
 [project]
 name = "yelo"
-version = "0.5.6"
+version = "0.5.7"
 description = "Claude and Codex account profiles and a local usage HUD"
 readme = "README.md"
 authors = [
