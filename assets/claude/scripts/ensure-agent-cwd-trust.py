@@ -16,6 +16,13 @@ DEFAULT_ROOTS = (
     f"/private/tmp/claude-{os.getuid()}",
     f"/private/tmp/herdr-bus-{os.getuid()}",
     os.path.expanduser("~/.herdr/runs"),
+    # Swarm seat scratch. `swarm-spawn-role.py` spawns seats with a dir under here as
+    # their cwd and already grants `~/.swarm` as Codex's writable root, so trust has to
+    # reach it too: without it Codex opens its interactive directory-trust prompt and the
+    # pane sits on that prompt instead of running the agent, which swarm then reports as
+    # an agent that exited without a summary. Resolved the way that script resolves the
+    # store dir, so a relocated SWARM_HOME keeps the two in agreement.
+    os.path.join(os.environ.get("SWARM_HOME") or os.path.expanduser("~"), ".swarm", "ws"),
 )
 
 
