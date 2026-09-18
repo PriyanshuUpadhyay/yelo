@@ -559,7 +559,7 @@ class TestDispatchWiring(unittest.TestCase):
                                          round_id=1, attempt=1, input_digest="0" * 64,
                                          run_dir="/tmp/rd", prompt="do the thing")
         line = publish_line(text)
-        self.assertIn("agent-handoff.py publish --file <absolute path>", line)
+        self.assertIn("agent-handoff publish --file <absolute path>", line)
         self.assertIn("--outcome blocked", line)
         self.assertNotIn("HERDR_BUS_DIR", text)
         self.assertNotIn("--run-id", text)

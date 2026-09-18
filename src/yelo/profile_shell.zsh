@@ -92,7 +92,6 @@ _claude_launch_kind() {
 
 _cprofile() {
   local profile= x seen_profile=0 after_dd=0 index=1
-  local resume_id= expect_resume=0
   local -a args tokens
   if [ "${1:-}" = profile ]; then
     shift
@@ -105,17 +104,6 @@ _cprofile() {
     if (( after_dd )); then
       args+=("$x")
       continue
-    fi
-    # A token that is a flag (or absent) is not a resume id — `--resume` alone opens the
-    # picker. Ids are only captured here, before `--`, so positional args are never scanned.
-    # Each `--resume` clears the previous id (below), so a later idless one wins as "no id".
-    if (( expect_resume )); then
-      expect_resume=0
-      case "$x" in
-        -*) ;;
-        ''|*[!A-Za-z0-9-]*) ;;
-        *) resume_id="$x" ;;
-      esac
     fi
     case "$x" in
       --) after_dd=1; args+=("$x") ;;
@@ -131,12 +119,6 @@ _cprofile() {
       --profile=*)
         (( seen_profile )) && { print -u2 "claude: --profile specified more than once"; return 2; }
         profile="${x#*=}"; seen_profile=1
-        ;;
-      --resume) resume_id=; expect_resume=1; args+=("$x") ;;
-      --resume=*)
-        resume_id=
-        case "${x#*=}" in ''|*[!A-Za-z0-9-]*) ;; *) resume_id="${x#*=}" ;; esac
-        args+=("$x")
         ;;
       *) args+=("$x") ;;
     esac
@@ -154,18 +136,6 @@ _cprofile() {
     # Valueless --profile: an explicit request to choose, so no other source applies.
     [ -t 0 ] && [ -t 1 ] || { print -u2 "claude: --profile requires a name"; return 2; }
     resolved="$(_yelo_profile_pick claude "${args[@]}")" || return 2
-  fi
-  # Existing session maps retain the owning account across terminal restores.
-  # They outrank the ambient account; an invalid map falls through to an explicit choice.
-  if [ -z "$resolved" ] && [ -n "$resume_id" ]; then
-    local map_file="$HOME/.claude/.profiles/.session-map/$resume_id" mapped=
-    if [ -f "$map_file" ] && [ ! -L "$map_file" ]; then
-      IFS= read -r mapped < "$map_file" 2>/dev/null || :
-      if _cprofile_valid_name "$mapped"; then
-        resolved="$(_yelo_profile_resolve claude "$mapped" 2>/dev/null)"
-        [ -z "$resolved" ] || touch "$map_file" 2>/dev/null  # keeps the prune off a live session
-      fi
-    fi
   fi
   if [ -z "$resolved" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
     _claude_binary "${args[@]}"

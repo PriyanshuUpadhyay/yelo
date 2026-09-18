@@ -1135,7 +1135,7 @@ class CollectorTests(unittest.TestCase):
                                       deadline_seconds=1.0)
         seat = handoff.Seat("hunter-types", "t", "hunt", INPUT_DIGEST)
         text = collector._dispatch_text(seat, 1)
-        self.assertIn("agent-handoff.py publish --file <absolute path>", text)
+        self.assertIn("agent-handoff publish --file <absolute path>", text)
         self.assertNotIn(hostile, text)
         self.assertNotIn(RUN_ID, text)
         self.assertNotIn(INPUT_DIGEST, text)
@@ -2711,7 +2711,7 @@ class PendingSeatTests(unittest.TestCase):
             code = handoff.main(["prompt", "--target", "hunter-types", "--text", "round 2"])
         self.assertEqual(code, 0)
         self.assertIn("round 2", sent["text"])
-        self.assertIn("agent-handoff.py publish --file <absolute path>", sent["text"])
+        self.assertIn("agent-handoff publish --file <absolute path>", sent["text"])
         self.assertNotIn("herdr-bus", sent["text"])
         self.assertNotIn("--run-id", sent["text"])
         self.assertEqual(sent["dispatch"]["workflow"], "manual")
@@ -2756,8 +2756,7 @@ class PendingSeatTests(unittest.TestCase):
 class WorkerSessionGuardTests(unittest.TestCase):
     """HL-064 residual: a leaf must not chair collect/dispatch loops."""
 
-    MARKERS = ("HERDR_AGENT_PANE", "AGENT_TEAMMATE_CHILD", "HERDR_REGISTRY_ROOT",
-               "HERDR_REGISTRY_CAPABILITY", "HERDR_REGISTRY_KEY")
+    MARKERS = ("HERDR_AGENT_PANE", "SWARM_AGENT_ID")
 
     def scoped_env(self, **values):
         saved = {name: os.environ.get(name) for name in self.MARKERS}
@@ -2775,7 +2774,7 @@ class WorkerSessionGuardTests(unittest.TestCase):
         os.environ.update(values)
 
     def test_collect_refuses_in_a_child_session(self):
-        self.scoped_env(AGENT_TEAMMATE_CHILD="1")
+        self.scoped_env(SWARM_AGENT_ID="cl-seat-1")
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             self.assertEqual(handoff.main(["collect", "--spec", "/nonexistent.json"]), 3)
@@ -2786,15 +2785,9 @@ class WorkerSessionGuardTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(handoff.main(["dispatch", "--spec", "/nonexistent.json"]), 3)
 
-    def test_a_registry_root_outranks_its_child_markers(self):
-        self.scoped_env(AGENT_TEAMMATE_CHILD="1", HERDR_REGISTRY_ROOT="run",
-                        HERDR_REGISTRY_CAPABILITY="cap")
+    def test_the_orchestrator_seat_is_not_a_worker(self):
+        self.scoped_env(SWARM_AGENT_ID="orchestrator")
         self.assertFalse(handoff._worker_session())
-
-    def test_a_registry_leaf_key_keeps_the_refusal(self):
-        self.scoped_env(AGENT_TEAMMATE_CHILD="1", HERDR_REGISTRY_ROOT="run",
-                        HERDR_REGISTRY_CAPABILITY="cap", HERDR_REGISTRY_KEY="k")
-        self.assertTrue(handoff._worker_session())
 
 
 if __name__ == "__main__":
