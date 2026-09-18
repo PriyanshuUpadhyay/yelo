@@ -58,6 +58,16 @@ class EnsureAgentCwdTrustTests(unittest.TestCase):
                 trust.configured_roots(),
             )
 
+    def test_default_roots_include_the_swarm_seat_scratch(self):
+        # swarm-spawn-role.py gives Codex seats a cwd under here; an untrusted cwd
+        # leaves the pane on Codex's interactive trust prompt instead of the agent.
+        with mock.patch.dict(os.environ):
+            os.environ.pop("AGENT_TRUST_ROOTS", None)
+            self.assertIn(
+                os.path.realpath(os.path.expanduser("~/.swarm/ws")),
+                trust.configured_roots(),
+            )
+
     def test_rejects_a_writable_generated_path_component(self):
         unsafe = self.root / "unsafe"
         unsafe.mkdir(mode=0o777)
