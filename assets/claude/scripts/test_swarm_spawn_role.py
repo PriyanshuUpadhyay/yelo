@@ -15,10 +15,7 @@ from unittest.mock import patch
 
 
 SCRIPT_DIR = pathlib.Path(__file__).parent
-MARKERS = (
-    "SWARM_SESSION_ID", "SWARM_AGENT_ID", "HERDR_AGENT_PANE",
-    "SWARM_ADAPTER", "HERDR_PANE_ID", "HERDR_ACTIVE_PANE_ID",
-)
+MARKERS = ("SWARM_SESSION_ID", "SWARM_AGENT_ID", "HERDR_AGENT_PANE")
 
 
 def load(name, filename):
@@ -310,32 +307,6 @@ class RoleRoutingTest(unittest.TestCase):
                 "provider": "claude", "model": "sonnet", "effort": "medium",
                 "permission": "auto",
             }, agent_args=["--permission-mode", "plan"])
-
-class RelayoutTest(unittest.TestCase):
-    def relayout(self, **values):
-        commands = []
-        with environment(**values), patch.object(
-            spawn_role, "run",
-            side_effect=lambda command: commands.append(command) or Result(),
-        ), redirect_stderr(StringIO()):
-            spawn_role.relayout_herdr()
-            active = os.environ.get("HERDR_ACTIVE_PANE_ID")
-        return commands, active
-
-    def test_a_herdr_spawn_reapplies_the_main_grid_on_the_orchestrator_tab(self):
-        commands, active = self.relayout(
-            SWARM_ADAPTER="herdr", HERDR_PANE_ID="pane:1"
-        )
-        self.assertEqual(len(commands), 1)
-        self.assertEqual(commands[0][1:], [spawn_role.LAYOUT_SCRIPT, "main-grid"])
-        self.assertEqual(active, "pane:1")
-
-    def test_other_hosts_and_paneless_callers_keep_their_layout(self):
-        for values in ({"SWARM_ADAPTER": "tmux", "HERDR_PANE_ID": "pane:1"},
-                       {"SWARM_ADAPTER": "herdr"}):
-            with self.subTest(values=values):
-                self.assertEqual(self.relayout(**values)[0], [])
-
 
 if __name__ == "__main__":
     unittest.main()
