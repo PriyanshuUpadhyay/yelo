@@ -69,7 +69,7 @@ DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 HELPER = os.path.abspath(__file__)
 HERDR_BUS = os.path.join(os.path.dirname(HELPER), "herdr-bus.py")
 PUBLISH_COMMAND = os.environ.get(
-    "AGENT_HANDOFF_COMMAND", "python3 ~/.claude/scripts/agent-handoff.py"
+    "AGENT_HANDOFF_COMMAND", "agent-handoff"
 )
 WORKER_HISTORY_CLASSIFIER = os.path.expanduser(
     "~/.claude/hooks/worker-history-classifier.py"
@@ -2218,14 +2218,10 @@ WORKER_SESSION_REFUSAL = (
 
 
 def _worker_session():
-    """HL-064 markers agent-teammate.py plants in every child. A registry ROOT outranks
-    them: its capability is an explicit grant to orchestrate (see bash-guard.sh)."""
-    if (os.environ.get("HERDR_REGISTRY_ROOT")
-            and os.environ.get("HERDR_REGISTRY_CAPABILITY")
-            and not os.environ.get("HERDR_REGISTRY_KEY")):
-        return False
-    return any(os.environ.get(name) == "1"
-               for name in ("HERDR_AGENT_PANE", "AGENT_TEAMMATE_CHILD"))
+    """HL-064. A swarm seat, or a Herdr agent pane (see bash-guard.sh)."""
+    agent = os.environ.get("SWARM_AGENT_ID")
+    return (os.environ.get("HERDR_AGENT_PANE") == "1"
+            or (agent is not None and agent != "orchestrator"))
 
 
 def command_collect(args):
