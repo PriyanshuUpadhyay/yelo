@@ -11,7 +11,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import uuid
@@ -20,7 +19,6 @@ import uuid
 ROUTING_SCRIPT = "/Users/priyanshu/.claude/scripts/agent-routing.mjs"
 TRUST_SCRIPT = "/Users/priyanshu/.claude/scripts/ensure-cwd-trust.sh"
 PROVIDER_TRUST_SCRIPT = "/Users/priyanshu/.claude/scripts/ensure-agent-cwd-trust.py"
-LAYOUT_SCRIPT = "/Users/priyanshu/.config/herdr/bin/layout-shortcuts/action.mjs"
 RESUME_FLAGS = ("-r", "--resume", "-c", "--continue", "--fork-session")
 WORKER_POOL = (".herdr", "workers")
 WORKER_SID_PREFIX = "aaaaaaaa"
@@ -249,26 +247,6 @@ def run_spawn(command, cwd):
     sys.stdout.write(result.stdout)
 
 
-def relayout_herdr():
-    """Herdr only: re-apply the main-grid layout so a new child pane joins the right
-    grid instead of shrinking the orchestrator. Every spawn re-applies it, because no
-    spawn knows it is the last one; the layout is idempotent. Cosmetic, so a failure
-    only warns and the spawn still counts as done.
-    """
-    pane = os.environ.get("HERDR_PANE_ID")
-    node = shutil.which("node")
-    if os.environ.get("SWARM_ADAPTER") != "herdr" or not pane or not node:
-        return
-    os.environ["HERDR_ACTIVE_PANE_ID"] = pane
-    try:
-        result = run([node, LAYOUT_SCRIPT, "main-grid"])
-    except OSError as error:
-        result = argparse.Namespace(returncode=1, stderr=str(error), stdout="")
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "layout failed"
-        sys.stderr.write(f"swarm-spawn-role: main-grid layout skipped: {detail}\n")
-
-
 def main(argv=None):
     if worker_session():
         print(
@@ -286,7 +264,6 @@ def main(argv=None):
     except (OSError, RuntimeError) as error:
         print(f"swarm-spawn-role: {error}", file=sys.stderr)
         return 2
-    relayout_herdr()
     return 0
 
 

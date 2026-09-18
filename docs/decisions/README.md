@@ -8,6 +8,7 @@ commit.
 
 | #    | Title                                              | Status   | Date       | Origin          |
 |------|----------------------------------------------------|----------|------------|-----------------|
+| 0017 | Place swarm panes in the main-grid shape at spawn time | accepted | 2026-09-18 | yelo            |
 | 0016 | Swarm is the only spawn path                       | accepted | 2026-09-18 | yelo            |
 | 0015 | Pick the account by the launch model's own limit   | accepted | 2026-09-17 | yelo            |
 | 0014 | Use a mirrored Claude config directory per account | accepted | 2026-09-16 | jello           |
