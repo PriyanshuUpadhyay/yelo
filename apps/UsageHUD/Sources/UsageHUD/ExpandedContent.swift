@@ -321,14 +321,14 @@ private struct ProviderSection: View {
                                 .help(subtitle.warning
                                       ? "Refresh could not update this account. The value shown is the last local sample."
                                       : "When this account's usage was last confirmed")
-                            if fetchStatuses[account.label] == "auth-stale",
+                            if subtitle.warning,
                                let launcher = account.rows.compactMap(\.launcher).first {
                                 Button("Start") { openLauncher(launcher) }
                                     .buttonStyle(.plain)
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(warnTextColor)
                                     .underline()
-                                    .help("Start \((launcher as NSString).lastPathComponent) in Terminal to renew its token")
+                                    .help("Start \((launcher as NSString).lastPathComponent) in Terminal to renew its token and usage")
                                     .accessibilityLabel("Start this account's CLI to renew its token")
                             }
                         }
