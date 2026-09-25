@@ -24,6 +24,8 @@ struct MeterRow: Codable, Equatable {
     var source: String? = nil
     /// Whether the CLI can fetch this provider's usage on request.
     var canFetch: Bool? = nil
+    /// The account's yelo launcher. Starting it lets the CLI renew an expired token.
+    var launcher: String? = nil
 }
 
 extension MeterRow {
@@ -264,7 +266,7 @@ func apiFetchSummary(_ output: String, exitCode: Int32) -> APIFetchResult {
     }
     if words.contains("auth-stale") {
         return APIFetchResult(
-            message: "Updated \(updated) of \(words.count) accounts. Open each marked account's launcher to renew its token.",
+            message: "Updated \(updated) of \(words.count) accounts. Click Start on each marked account to renew its token.",
             warning: true, statuses: statuses)
     }
     if words.allSatisfy({ $0 == "ok" || $0 == "fable-write-failed" }) {
