@@ -63,6 +63,8 @@ final class UsageModel: ObservableObject {
     @Published var isRefreshing: Bool = false
     @Published var isFetching: Bool = false
     @Published var apiFetchResult: APIFetchResult?
+    /// Launchers whose background renewal is still running.
+    @Published var renewing: Set<String> = []
 
     /// No rows AND a failed fetch = the FIRST-EVER fetch failed (never had data to show) — distinct
     /// from a mid-run failure, which keeps last-known rows on screen.
@@ -139,6 +141,19 @@ final class UsageModel: ObservableObject {
                 self.isFetching = false
                 // Read again even after partial failure: successful accounts already wrote caches.
                 self.refresh()
+            }
+        }
+    }
+
+    /// Runs the account's CLI once in the background so it renews its token, then fetches again.
+    func renew(launcher: String) {
+        guard renewing.insert(launcher).inserted else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            runRenewal(launcher: launcher)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.renewing.remove(launcher)
+                self.fetchFromAPI()
             }
         }
     }
@@ -266,7 +281,7 @@ func apiFetchSummary(_ output: String, exitCode: Int32) -> APIFetchResult {
     }
     if words.contains("auth-stale") {
         return APIFetchResult(
-            message: "Updated \(updated) of \(words.count) accounts. Click Start on each marked account to renew its token.",
+            message: "Updated \(updated) of \(words.count) accounts. Click Renew on each marked account.",
             warning: true, statuses: statuses)
     }
     if words.allSatisfy({ $0 == "ok" || $0 == "fable-write-failed" }) {
@@ -276,6 +291,31 @@ func apiFetchSummary(_ output: String, exitCode: Int32) -> APIFetchResult {
     // No "Try Refresh again": the person just pressed Refresh, and the rows name what failed.
     return APIFetchResult(message: "Updated \(updated) of \(words.count) accounts.",
                           warning: true, statuses: statuses)
+}
+
+/// The CLI's print mode runs its `/usage` command: one usage API call and no model turn. The CLI
+/// renews an expired token before that call. The launcher finds the CLI on PATH, which launchd
+/// leaves bare.
+// ponytail: PATH guesses the launcher dir and Homebrew; read the login shell's PATH if the CLI lives elsewhere.
+func runRenewal(launcher: String, timeout: TimeInterval = 60) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: launcher)
+    process.arguments = ["-p", "/usage"]
+    var environment = ProcessInfo.processInfo.environment
+    let bin = (launcher as NSString).deletingLastPathComponent
+    environment["PATH"] = "\(bin):/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
+    process.environment = environment
+    process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do { try process.run() } catch { return }
+    let deadline = DispatchWorkItem {
+        if process.isRunning { process.terminate() }
+    }
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: deadline)
+    process.waitUntilExit()
+    deadline.cancel()
 }
 
 func runAPIFetch(executable: String, timeout: TimeInterval = 120) -> APIFetchResult {

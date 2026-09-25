@@ -103,13 +103,6 @@ func accountSubtitle(_ rows: [MeterRow], fetchStatus: String?, now: Date = Date(
     return (parts.joined(separator: " · "), false)
 }
 
-/// Opens the account's launcher in Terminal, so the CLI starts and renews its token.
-private func openLauncher(_ path: String) {
-    NSWorkspace.shared.open([URL(fileURLWithPath: path)],
-                            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
-                            configuration: NSWorkspace.OpenConfiguration())
-}
-
 /// Risk meta for one row: red → limit ETA, amber → projected pct, green/no-trend → nil.
 private func riskText(_ pressure: RowPressure?) -> String? {
     guard let pressure, pressure.pressure != .green else { return nil }
@@ -267,6 +260,8 @@ private struct ProviderSection: View {
     let fetchedAt: Date?
     let reduceMotion: Bool
     let fetchStatuses: [String: String]
+    let renewing: Set<String>
+    let onRenew: (String) -> Void
     /// Index of this card's first account within the whole list, so the bar cascade runs top to
     /// bottom across cards instead of restarting per provider.
     let rowIndexOffset: Int
@@ -321,15 +316,20 @@ private struct ProviderSection: View {
                                 .help(subtitle.warning
                                       ? "Refresh could not update this account. The value shown is the last local sample."
                                       : "When this account's usage was last confirmed")
-                            if subtitle.warning,
+                            // Claude only: the renewal runs its `/usage` command, which codex lacks.
+                            if subtitle.warning, provider == "claude",
                                let launcher = account.rows.compactMap(\.launcher).first {
-                                Button("Start") { openLauncher(launcher) }
-                                    .buttonStyle(.plain)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(warnTextColor)
-                                    .underline()
-                                    .help("Start \((launcher as NSString).lastPathComponent) in Terminal to renew its token and usage")
-                                    .accessibilityLabel("Start this account's CLI to renew its token")
+                                if renewing.contains(launcher) {
+                                    ProgressView().controlSize(.mini)
+                                } else {
+                                    Button("Renew") { onRenew(launcher) }
+                                        .buttonStyle(.plain)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(warnTextColor)
+                                        .underline()
+                                        .help("Run \((launcher as NSString).lastPathComponent) in the background to renew its token, then refresh")
+                                        .accessibilityLabel("Renew this account's token")
+                                }
                             }
                         }
                     }
@@ -428,6 +428,7 @@ struct ExpandedContent: View {
                                 provider: section.provider, rows: section.rows, pressures: model.rowPressures,
                                 fetchedAt: model.lastSnapshotAt, reduceMotion: reduceMotion,
                                 fetchStatuses: model.apiFetchResult?.statuses ?? [:],
+                                renewing: model.renewing, onRenew: model.renew,
                                 rowIndexOffset: sections[..<index].reduce(0) { $0 + groupedByLabel($1.rows).count }
                             )
                         }
