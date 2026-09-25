@@ -21,6 +21,7 @@ import math
 import os
 import time
 
+from .. import launchers
 from ..profile import core
 from . import fetch
 
@@ -446,14 +447,25 @@ def active_index(rows):
     return best
 
 
+def with_launcher(rows, cli, account, home):
+    """Tag an account's rows with its launcher path, so the HUD can start that CLI to renew
+    an expired token. Only a launcher yelo wrote qualifies: the HUD executes this path."""
+    name = account.get("name")
+    if not name or not core.valid_name(name):
+        return rows
+    path = launchers.path_for(cli, name, home)
+    if launchers.ours(path):
+        for row in rows:
+            row["launcher"] = path
+    return rows
+
+
 def snapshot_rows(home, now=None):
     """Every account's rows, in census order: claude profiles first, then codex homes.
 
     `home` names the HOME the census is taken under; discovery itself is core's (law L2),
-    which resolves the same HOME, so this argument documents the caller's intent rather
-    than re-deriving the layout.
+    which resolves the same HOME. The launcher paths are joined under it.
     """
-    del home
     if now is None:
         now = time.time()
     root = core.claude_root()
@@ -471,10 +483,11 @@ def snapshot_rows(home, now=None):
         # No timestamp anywhere: omit the flag entirely so the HUD keeps its
         # include-everything fallback instead of excluding every profile as inactive.
         flag = None if active < 0 else index == active
-        rows.extend(claude_rows(row, core.hud_label("claude", row),
-                                None, flag, claude_fetch,
-                                now, limit))
+        rows.extend(with_launcher(claude_rows(row, core.hud_label("claude", row),
+                                              None, flag, claude_fetch, now, limit),
+                                  "claude", row, home))
     for row in codex:
-        rows.extend(codex_rows(row, core.hud_label("codex", row), None,
-                               codex_fetch, now, limit))
+        rows.extend(with_launcher(codex_rows(row, core.hud_label("codex", row), None,
+                                             codex_fetch, now, limit),
+                                  "codex", row, home))
     return rows

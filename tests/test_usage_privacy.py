@@ -38,3 +38,18 @@ def test_setup_leaves_old_prime_launchers_alone(bench):
     launcher.write_text(content)
     assert bench.run("setup").returncode == 0
     assert launcher.read_text() == content
+
+
+def test_snapshot_names_only_yelo_launchers(tmp_path, monkeypatch):
+    from yelo import launchers
+
+    home = build_usage_home(tmp_path / "home", 1_900_000_000)
+    monkeypatch.setattr(core, "HOME", str(home))
+    written = launchers.rows(str(home))
+    for path, body in written:
+        launchers.write(path, body)
+    foreign = written[0][0]
+    launchers.write(foreign, "#!/bin/sh\nexit 0\n")
+    rows = snapshot.snapshot_rows(str(home), now=1_900_000_000)
+    tagged = {row["launcher"] for row in rows if "launcher" in row}
+    assert tagged == {path for path, _ in written[1:]}

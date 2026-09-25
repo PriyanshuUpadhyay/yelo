@@ -103,6 +103,13 @@ func accountSubtitle(_ rows: [MeterRow], fetchStatus: String?, now: Date = Date(
     return (parts.joined(separator: " · "), false)
 }
 
+/// Opens the account's launcher in Terminal, so the CLI starts and renews its token.
+private func openLauncher(_ path: String) {
+    NSWorkspace.shared.open([URL(fileURLWithPath: path)],
+                            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                            configuration: NSWorkspace.OpenConfiguration())
+}
+
 /// Risk meta for one row: red → limit ETA, amber → projected pct, green/no-trend → nil.
 private func riskText(_ pressure: RowPressure?) -> String? {
     guard let pressure, pressure.pressure != .green else { return nil }
@@ -306,13 +313,25 @@ private struct ProviderSection: View {
                             .foregroundStyle(textPrimary)
                             .lineLimit(1).truncationMode(.middle)
                             .help(accountName(label: account.label, provider: provider))
-                        Text(subtitle.text)
-                            .font(.system(size: 10))
-                            .foregroundStyle(subtitle.warning ? warnTextColor : textSecondary)
-                            .lineLimit(1)
-                            .help(subtitle.warning
-                                  ? "Refresh could not update this account. The value shown is the last local sample."
-                                  : "When this account's usage was last confirmed")
+                        HStack(spacing: 6) {
+                            Text(subtitle.text)
+                                .font(.system(size: 10))
+                                .foregroundStyle(subtitle.warning ? warnTextColor : textSecondary)
+                                .lineLimit(1)
+                                .help(subtitle.warning
+                                      ? "Refresh could not update this account. The value shown is the last local sample."
+                                      : "When this account's usage was last confirmed")
+                            if fetchStatuses[account.label] == "auth-stale",
+                               let launcher = account.rows.compactMap(\.launcher).first {
+                                Button("Start") { openLauncher(launcher) }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(warnTextColor)
+                                    .underline()
+                                    .help("Start \((launcher as NSString).lastPathComponent) in Terminal to renew its token")
+                                    .accessibilityLabel("Start this account's CLI to renew its token")
+                            }
+                        }
                     }
                     .frame(width: accountWidth, alignment: .leading)
                     if let unavailable = account.rows.first(where: { $0.state == "offline" || $0.state == "logged_out" }) {

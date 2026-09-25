@@ -10,7 +10,8 @@ from . import legacy, launchers
 
 SHELL_HEADER = "# Installed by yelo profile integration.\n"
 ARCHIVE_HEADER = b"#!/usr/bin/env python3\n# Installed by yelo profile integration.\n"
-MODULES = ("profile/core.py", "usage/snapshot.py", "usage/fetch.py", "usage/codex.py", "profile_runtime.py")
+MODULES = ("profile/core.py", "usage/snapshot.py", "usage/fetch.py", "usage/codex.py", "profile_runtime.py",
+           "launchers.py")
 
 
 def runtime_path(home):
