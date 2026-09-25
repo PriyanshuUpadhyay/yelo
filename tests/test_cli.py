@@ -221,7 +221,7 @@ def test_version(yelo):
     """C01: the version R1 names."""
     result = yelo("--version")
     assert result.returncode == 0
-    assert result.stdout.strip() == "yelo 0.5.9"
+    assert result.stdout.strip() == "yelo 0.5.10"
 
 
 # --- the trailing-argv hook (board A3, chair ruling cli-extras-hook) -----------------------
