@@ -23,7 +23,7 @@ fn main() {
             "usage" => println!("usage: yelo usage {{show,fetch,doctor}} ..."),
             "setup" => println!("usage: yelo setup [launchers|profiles|profile-mirrors] [--json]"),
             "doctor" => println!("usage: yelo doctor [--json]"),
-            "hud" => println!("usage: yelo hud {{install,start,stop}} ..."),
+            "hud" => println!("usage: yelo hud {{install,assemble,start,stop}} ..."),
             _ => {
                 eprintln!("yelo: invalid command: {}", args[0]);
                 std::process::exit(2);

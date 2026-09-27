@@ -300,12 +300,7 @@ fi
 }
 
 fn standalone_shell() -> &'static str {
-    let source = include_str!("yelo/legacy.py");
-    source
-        .split("STANDALONE_SHELL = '''")
-        .nth(1)
-        .and_then(|s| s.split("'''").next())
-        .unwrap_or("")
+    include_str!("standalone_shell.zsh")
 }
 
 fn shell_owned(path: &Path) -> bool {

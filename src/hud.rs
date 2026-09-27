@@ -159,6 +159,68 @@ fn job_state() -> (bool, Option<i32>) {
     });
     (true, pid)
 }
+fn stage_bundle(
+    home: &Path,
+    source: &Path,
+    prebuilt: bool,
+) -> Result<(), (String, Option<PathBuf>)> {
+    let bundle_path = bundle(home);
+    let parent = bundle_path.parent().unwrap();
+    fs::create_dir_all(parent).map_err(|error| (error.to_string(), None))?;
+    let stage = parent.join(format!(".UsageHUD.app.new.{}", std::process::id()));
+    if stage.exists() {
+        let _ = fs::remove_dir_all(&stage);
+    }
+    let prepared = if prebuilt {
+        copy_tree(source, &stage)
+    } else {
+        let dest = stage.join("Contents/MacOS");
+        fs::create_dir_all(&dest)
+            .and_then(|_| fs::copy(source, dest.join("UsageHUD")).map(|_| ()))
+            .and_then(|_| {
+                fs::set_permissions(dest.join("UsageHUD"), fs::Permissions::from_mode(0o755))
+            })
+            .and_then(|_| fs::write(stage.join("Contents/Info.plist"), info_xml()))
+    };
+    if let Err(error) = prepared {
+        let _ = fs::remove_dir_all(&stage);
+        return Err((error.to_string(), None));
+    }
+    let signed = Command::new("codesign")
+        .args(["--force", "--sign", "-", "--identifier", &label()])
+        .arg(&stage)
+        .status();
+    match signed {
+        Ok(status) if status.success() => {}
+        Ok(_) => {
+            let _ = fs::remove_dir_all(&stage);
+            return Err(("codesign failed".into(), Some(stage)));
+        }
+        Err(error) => {
+            let _ = fs::remove_dir_all(&stage);
+            return Err((error.to_string(), Some(stage)));
+        }
+    }
+    let old = parent.join(format!(".UsageHUD.app.old.{}", std::process::id()));
+    if old.exists() {
+        let _ = fs::remove_dir_all(&old);
+    }
+    if bundle_path.exists() {
+        fs::rename(&bundle_path, &old).map_err(|error| (error.to_string(), None))?;
+    }
+    fs::rename(&stage, &bundle_path).map_err(|error| (error.to_string(), None))?;
+    if old.exists() {
+        let _ = fs::remove_dir_all(old);
+    }
+    Ok(())
+}
+fn assemble_bundle(home: &Path, package: &Path) -> Result<(), (String, Option<PathBuf>)> {
+    let source = package.join(".build/release/UsageHUD");
+    if !source.is_file() {
+        return Err(("swift build produced no binary".into(), Some(source)));
+    }
+    stage_bundle(home, &source, false)
+}
 fn install() -> i32 {
     let home = profile::home();
     let plist_path = plist(&home);
@@ -183,12 +245,12 @@ fn install() -> i32 {
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("apps/UsageHUD"));
-    let source = if let Some(path) = &prebuilt {
+    let assembled = if let Some(path) = &prebuilt {
         let source = PathBuf::from(path);
         if !source.join("Contents/MacOS/UsageHUD").is_file() {
             return report_error("install", "prebuilt bundle not found", Some(&source));
         }
-        source
+        stage_bundle(&home, &source, true)
     } else {
         if !package.join("Package.swift").is_file() {
             return report_error("install", "swift package not found", Some(&package));
@@ -202,64 +264,10 @@ fn install() -> i32 {
             Ok(_) => return report_error("install", "swift build failed", Some(&package)),
             Err(error) => return report_error("install", &error.to_string(), Some(&package)),
         }
-        let source = package.join(".build/release/UsageHUD");
-        if !source.is_file() {
-            return report_error("install", "swift build produced no binary", Some(&source));
-        }
-        source
+        assemble_bundle(&home, &package)
     };
-    let parent = bundle_path.parent().unwrap();
-    if let Err(error) = fs::create_dir_all(parent) {
-        return report_error("install", &error.to_string(), None);
-    }
-    let stage = parent.join(format!(".UsageHUD.app.new.{}", std::process::id()));
-    if stage.exists() {
-        let _ = fs::remove_dir_all(&stage);
-    }
-    let prepared = if prebuilt.is_some() {
-        copy_tree(&source, &stage)
-    } else {
-        let dest = stage.join("Contents/MacOS");
-        fs::create_dir_all(&dest)
-            .and_then(|_| fs::copy(&source, dest.join("UsageHUD")).map(|_| ()))
-            .and_then(|_| {
-                fs::set_permissions(dest.join("UsageHUD"), fs::Permissions::from_mode(0o755))
-            })
-            .and_then(|_| fs::write(stage.join("Contents/Info.plist"), info_xml()))
-    };
-    if let Err(error) = prepared {
-        let _ = fs::remove_dir_all(&stage);
-        return report_error("install", &error.to_string(), None);
-    }
-    let signed = Command::new("codesign")
-        .args(["--force", "--sign", "-", "--identifier", &label()])
-        .arg(&stage)
-        .status();
-    match signed {
-        Ok(status) if status.success() => {}
-        Ok(_) => {
-            let _ = fs::remove_dir_all(&stage);
-            return report_error("install", "codesign failed", Some(&stage));
-        }
-        Err(error) => {
-            let _ = fs::remove_dir_all(&stage);
-            return report_error("install", &error.to_string(), Some(&stage));
-        }
-    }
-    let old = parent.join(format!(".UsageHUD.app.old.{}", std::process::id()));
-    if old.exists() {
-        let _ = fs::remove_dir_all(&old);
-    }
-    if bundle_path.exists()
-        && let Err(error) = fs::rename(&bundle_path, &old)
-    {
-        return report_error("install", &error.to_string(), None);
-    }
-    if let Err(error) = fs::rename(&stage, &bundle_path) {
-        return report_error("install", &error.to_string(), None);
-    }
-    if old.exists() {
-        let _ = fs::remove_dir_all(old);
+    if let Err((message, path)) = assembled {
+        return report_error("install", &message, path.as_deref());
     }
     if let Some(path) = prebuilt {
         println!("bundle installed from {path}");
@@ -343,10 +351,16 @@ fn stop() -> i32 {
 pub fn run(args: &[String]) -> i32 {
     match args.get(1).map(String::as_str) {
         Some("install") => install(),
+        Some("assemble") if args.len() == 4 => {
+            match assemble_bundle(Path::new(&args[2]), Path::new(&args[3])) {
+                Ok(()) => 0,
+                Err((message, path)) => report_error("assemble", &message, path.as_deref()),
+            }
+        }
         Some("start") => start(),
         Some("stop") => stop(),
         _ => {
-            eprintln!("usage: yelo hud {{install|start|stop}}");
+            eprintln!("usage: yelo hud {{install|assemble|start|stop}}");
             2
         }
     }
