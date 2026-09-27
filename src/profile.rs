@@ -9,21 +9,29 @@ use std::{
 };
 
 #[derive(Clone, Serialize)]
-struct Row {
-    name: Option<String>,
-    dir: String,
-    email: Option<String>,
+pub(crate) struct Row {
+    pub(crate) name: Option<String>,
+    pub(crate) dir: String,
+    pub(crate) email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    plan: Option<String>,
+    pub(crate) plan: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    signed_in: Option<bool>,
-    aliases: Vec<String>,
+    pub(crate) signed_in: Option<bool>,
+    pub(crate) aliases: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) usage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) remaining: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) urgency: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fable_exhausted: Option<bool>,
 }
 
-fn home() -> PathBuf {
+pub(crate) fn home() -> PathBuf {
     PathBuf::from(env::var("HOME").unwrap_or_default())
 }
-fn claude_root() -> PathBuf {
+pub(crate) fn claude_root() -> PathBuf {
     env::var("AGENT_PROFILES_CLAUDE_ROOT")
         .ok()
         .filter(|s| !s.is_empty())
@@ -35,7 +43,7 @@ fn codex_root() -> PathBuf {
         .filter(|s| !s.is_empty())
         .map_or_else(home, PathBuf::from)
 }
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
@@ -52,10 +60,10 @@ fn first_line(path: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
 }
-fn read_json(path: &Path) -> Option<Value> {
+pub(crate) fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&fs::read(path).ok()?).ok()
 }
-fn dirs(path: &Path) -> Vec<PathBuf> {
+pub(crate) fn dirs(path: &Path) -> Vec<PathBuf> {
     let mut entries: Vec<_> = fs::read_dir(path)
         .into_iter()
         .flatten()
@@ -144,7 +152,7 @@ fn codex_identity(path: &Path) -> (Option<String>, Option<String>, bool) {
         .map(str::to_owned);
     (email, plan, signed_in)
 }
-fn rows(cli: &str, identity: bool) -> Vec<Row> {
+pub(crate) fn rows(cli: &str, identity: bool) -> Vec<Row> {
     if cli == "claude" {
         let root = claude_root();
         let alias_map = aliases(&root);
@@ -168,6 +176,10 @@ fn rows(cli: &str, identity: bool) -> Vec<Row> {
                     plan: None,
                     signed_in: None,
                     aliases,
+                    usage: None,
+                    remaining: None,
+                    urgency: None,
+                    fable_exhausted: None,
                 })
             })
             .collect();
@@ -201,6 +213,10 @@ fn rows(cli: &str, identity: bool) -> Vec<Row> {
                 plan,
                 signed_in: identity.then_some(signed_in),
                 aliases: Vec::new(),
+                usage: None,
+                remaining: None,
+                urgency: None,
+                fable_exhausted: None,
             }
         })
         .collect()
@@ -221,7 +237,7 @@ fn add_signed_in(cli: &str, rows: &mut [Row]) {
         }
     }
 }
-fn keychain_service(home: &Path, name: &str) -> String {
+pub(crate) fn keychain_service(home: &Path, name: &str) -> String {
     let identity = home.join(format!(".claude-{name}"));
     let hash = Sha256::digest(identity.to_string_lossy().as_bytes());
     format!(
@@ -230,7 +246,225 @@ fn keychain_service(home: &Path, name: &str) -> String {
     )
 }
 
-fn render(header: Vec<&str>, body: Vec<Vec<String>>) -> String {
+fn reset_hours(text: &str) -> Option<f64> {
+    if text == "now" {
+        return Some(0.0);
+    }
+    let mut total = 0.0;
+    let mut digits = String::new();
+    let mut found = false;
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        let value: f64 = digits.parse().ok()?;
+        total += match c {
+            'd' => value * 24.0,
+            'h' => value,
+            'm' => value / 60.0,
+            _ => return None,
+        };
+        digits.clear();
+        found = true;
+    }
+    (found && digits.is_empty()).then_some(total)
+}
+fn span(window: &str) -> f64 {
+    if window == "5h" { 5.0 } else { 168.0 }
+}
+fn cache_windows(
+    cli: &str,
+    row: &Row,
+    include_fable: bool,
+    now: i64,
+) -> Vec<(String, f64, Option<f64>)> {
+    let path = Path::new(&row.dir);
+    let mut windows = Vec::new();
+    if cli == "claude" {
+        let base = read_json(&path.join(".usage-api-cache.json")).unwrap_or(Value::Null);
+        for (window, key) in [("5h", "five_hour"), ("7d", "seven_day")] {
+            if let Some(used) = base[key]["used_percentage"].as_f64() {
+                let reset = base[key]["resets_at"].as_f64();
+                let used = if reset.is_some_and(|e| e <= now as f64) {
+                    0.0
+                } else {
+                    used
+                };
+                let hours = reset.map(|e| {
+                    if e <= now as f64 {
+                        span(window)
+                    } else {
+                        (e - now as f64) / 3600.0
+                    }
+                });
+                windows.push((window.into(), used, hours));
+            }
+        }
+        if include_fable {
+            let doc = read_json(&path.join(".usage-api-cache-fable.json")).unwrap_or(Value::Null);
+            let entry = &doc["seven_day"];
+            if let Some(used) = entry["used_percentage"].as_f64() {
+                let reset = entry["resets_at"].as_f64();
+                windows.push((
+                    "fb".into(),
+                    if reset.is_some_and(|e| e <= now as f64) {
+                        0.0
+                    } else {
+                        used
+                    },
+                    reset.map(|e| {
+                        if e <= now as f64 {
+                            168.0
+                        } else {
+                            (e - now as f64) / 3600.0
+                        }
+                    }),
+                ));
+            }
+        }
+    } else {
+        let doc = read_json(&path.join(".usage-hud-api-cache.json")).unwrap_or(Value::Null);
+        for entry in [
+            &doc["rate_limits"]["primary"],
+            &doc["rate_limits"]["secondary"],
+        ] {
+            if let Some(used) = entry["used_percent"].as_f64() {
+                let window = if entry["window_minutes"].as_f64().is_some_and(|m| m <= 300.0) {
+                    "5h"
+                } else {
+                    "7d"
+                };
+                let reset = entry["resets_at"].as_f64();
+                windows.push((
+                    window.into(),
+                    if reset.is_some_and(|e| e <= now as f64) {
+                        0.0
+                    } else {
+                        used
+                    },
+                    reset.map(|e| {
+                        if e <= now as f64 {
+                            span(window)
+                        } else {
+                            (e - now as f64) / 3600.0
+                        }
+                    }),
+                ));
+            }
+        }
+    }
+    windows
+}
+fn add_usage(
+    cli: &str,
+    rows: &mut [Row],
+    snapshot: Option<&[Value]>,
+    include_fable: bool,
+    _model: Option<&str>,
+) {
+    let now = crate::usage::now();
+    for row in rows {
+        let mut windows = Vec::new();
+        if let Some(data) = snapshot {
+            let primary = crate::usage::label(cli, row);
+            let legacy = row
+                .name
+                .as_ref()
+                .map(|n| format!("{}·{n}", if cli == "claude" { "cl" } else { "cx" }));
+            let mut labels = vec![primary];
+            if let Some(legacy) = legacy
+                && !labels.contains(&legacy)
+            {
+                labels.push(legacy);
+            }
+            if cli == "codex" && row.dir.ends_with("/.codex") {
+                labels.push("cx".into());
+            }
+            for label in labels {
+                let matched: Vec<_> = data
+                    .iter()
+                    .filter(|r| r["provider"] == cli && r["label"] == label)
+                    .collect();
+                if matched.is_empty() {
+                    continue;
+                }
+                for entry in matched {
+                    let Some(window) = entry["window"].as_str() else {
+                        continue;
+                    };
+                    if !matches!(window, "5h" | "7d" | "fb") || (window == "fb" && !include_fable) {
+                        continue;
+                    }
+                    let Some(pct) = entry["pct"].as_f64() else {
+                        continue;
+                    };
+                    let (used, hours) = if entry["reset"] == "now" {
+                        (0.0, Some(span(window)))
+                    } else {
+                        (pct, entry["reset"].as_str().and_then(reset_hours))
+                    };
+                    windows.push((window.to_owned(), used, hours));
+                }
+                break;
+            }
+        }
+        if windows.is_empty() {
+            windows = cache_windows(cli, row, include_fable, now);
+        } else if include_fable && !windows.iter().any(|(w, _, _)| w == "fb") {
+            windows.extend(
+                cache_windows(cli, row, true, now)
+                    .into_iter()
+                    .filter(|(w, _, _)| w == "fb"),
+            );
+        }
+        if include_fable {
+            row.fable_exhausted = Some(windows.iter().any(|(w, p, _)| w == "fb" && *p >= 100.0));
+        }
+        if windows.is_empty() {
+            row.usage = Some(if snapshot.is_some() { "no data" } else { "?" }.into());
+            row.remaining = Some(if snapshot.is_some() {
+                serde_json::json!(100)
+            } else {
+                Value::Null
+            });
+            row.urgency = Some(if snapshot.is_some() {
+                serde_json::json!(1.0)
+            } else {
+                Value::Null
+            });
+            continue;
+        }
+        let mut parts = Vec::new();
+        for window in ["5h", "7d", "fb"] {
+            if let Some((_, used, _)) = windows.iter().find(|(w, _, _)| w == window) {
+                parts.push(format!("{window} {}% left", (100.0 - used).round() as i64));
+            }
+        }
+        row.usage = Some(parts.join(" · "));
+        row.remaining = Some(serde_json::json!(
+            windows
+                .iter()
+                .map(|(_, used, _)| (100.0 - used).round() as i64)
+                .min()
+                .unwrap_or(100)
+        ));
+        let ranked: Vec<_> = if include_fable && windows.iter().any(|(w, _, _)| w == "fb") {
+            windows.iter().filter(|(w, _, _)| w == "fb").collect()
+        } else {
+            windows.iter().collect()
+        };
+        let score = ranked
+            .into_iter()
+            .map(|(window, used, hours)| {
+                let fraction = hours.map_or(1.0, |h| (h / span(window)).clamp(0.02, 1.0));
+                ((100.0 - used) / 100.0) / fraction
+            })
+            .fold(0.0, f64::max);
+        row.urgency = Some(serde_json::json!((score * 1000.0).round() / 1000.0));
+    }
+}
+pub(crate) fn render(header: Vec<&str>, body: Vec<Vec<String>>) -> String {
     let widths: Vec<_> = (0..header.len())
         .map(|i| {
             body.iter()
@@ -253,9 +487,13 @@ fn render(header: Vec<&str>, body: Vec<Vec<String>>) -> String {
     }
     out
 }
-fn command_list(cli: &str, json: bool) -> i32 {
+fn command_list(cli: &str, json: bool, with_usage: bool) -> i32 {
     let mut found = rows(cli, true);
     add_signed_in(cli, &mut found);
+    if with_usage {
+        let data = crate::usage::snapshot(crate::usage::now()).ok();
+        add_usage(cli, &mut found, data.as_deref(), false, None);
+    }
     if json {
         println!("{}", serde_json::to_string(&found).unwrap());
         return 0;
@@ -268,6 +506,9 @@ fn command_list(cli: &str, json: bool) -> i32 {
     if cli == "codex" {
         header.push("PLAN");
     }
+    if with_usage {
+        header.push("USAGE");
+    }
     let body = found
         .iter()
         .map(|r| {
@@ -277,6 +518,13 @@ fn command_list(cli: &str, json: bool) -> i32 {
             ];
             if cli == "codex" {
                 cells.push(r.plan.as_deref().unwrap_or("-").to_owned());
+            }
+            if with_usage {
+                cells.push(if r.signed_in == Some(false) {
+                    "not signed in".into()
+                } else {
+                    r.usage.clone().unwrap_or_else(|| "?".into())
+                });
             }
             cells
         })
@@ -430,10 +678,58 @@ fn command_menu(cli: &str) -> i32 {
     }
     0
 }
-fn command_pick(cli: &str, json: bool) -> i32 {
+fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
     let mut found = rows(cli, true);
     add_signed_in(cli, &mut found);
     found.retain(|row| row.signed_in == Some(true));
+    let data = crate::usage::snapshot(crate::usage::now()).ok();
+    let model = args
+        .windows(2)
+        .find(|p| p[0] == "--model")
+        .map(|p| p[1].as_str());
+    let fable = cli == "claude"
+        && model
+            .is_some_and(|m| m.to_lowercase().contains("fable") || m.eq_ignore_ascii_case("best"));
+    add_usage(cli, &mut found, data.as_deref(), fable, model);
+    if fable {
+        found.retain(|r| r.fable_exhausted != Some(true));
+        if found.is_empty() {
+            eprintln!(
+                "claude: Fable usage is exhausted on every signed-in account; wait for reset or choose another model with --model"
+            );
+            return 1;
+        }
+    }
+    if found.len() > 1 {
+        let judged: Vec<_> = found
+            .iter()
+            .filter(|r| r.remaining.as_ref().is_some_and(Value::is_number))
+            .collect();
+        if judged.is_empty() {
+            eprintln!("{cli}: no usage data to pick an account from");
+            return 1;
+        }
+        let usable = judged
+            .iter()
+            .any(|r| r.remaining.as_ref().and_then(Value::as_i64).unwrap_or(0) > 0);
+        let best = judged
+            .into_iter()
+            .filter(|r| !usable || r.remaining.as_ref().and_then(Value::as_i64).unwrap_or(0) > 0)
+            .max_by(|a, b| {
+                let rank = |r: &Row| {
+                    (
+                        r.urgency.as_ref().and_then(Value::as_f64).unwrap_or(0.0),
+                        r.remaining.as_ref().and_then(Value::as_i64).unwrap_or(0),
+                    )
+                };
+                let left = rank(a);
+                let right = rank(b);
+                left.0.total_cmp(&right.0).then(left.1.cmp(&right.1))
+            })
+            .unwrap()
+            .clone();
+        found = vec![best];
+    }
     match found.as_slice() {
         [] => {
             eprintln!("{cli}: no signed-in account to pick from");
@@ -443,10 +739,7 @@ fn command_pick(cli: &str, json: bool) -> i32 {
             emit_row(row, json);
             0
         }
-        _ => {
-            eprintln!("{cli}: no usage data to pick an account from");
-            1
-        }
+        _ => unreachable!(),
     }
 }
 fn rollout_files(directory: &Path, archived: bool) -> Vec<(String, String, PathBuf)> {
@@ -667,10 +960,10 @@ pub fn run(args: &[String]) -> i32 {
         .unwrap_or("");
     let json = args.iter().any(|a| a == "--json");
     match action {
-        "list" => command_list(cli, json),
+        "list" => command_list(cli, json, args.iter().any(|a| a == "--usage")),
         "resolve" => command_resolve(cli, args.last().map(String::as_str).unwrap_or(""), json),
         "menu" => command_menu(cli),
-        "pick" => command_pick(cli, json),
+        "pick" => command_pick(cli, json, args),
         "sessions" => command_sessions(args, json),
         "owner" => command_owner(args, json),
         "create" => manage::create(cli, args),
