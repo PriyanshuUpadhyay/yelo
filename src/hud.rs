@@ -396,17 +396,6 @@ pub(crate) fn check_hud(
     home: &Path,
     _: bool,
 ) -> Result<(&'static str, String), (String, Option<PathBuf>)> {
-    let legacy = home.join("Library/LaunchAgents/work.example.usage-hud.plist");
-    if setup::dotfiles_owned(&legacy) {
-        return Ok((
-            "owned-by-dotfiles",
-            format!(
-                "symlink into {}: {}",
-                setup::dotfiles_root().display(),
-                legacy.display()
-            ),
-        ));
-    }
     let plist_path = plist(home);
     if !plist_path.is_file() {
         return Ok(("missing", format!("absent: {}", plist_path.display())));

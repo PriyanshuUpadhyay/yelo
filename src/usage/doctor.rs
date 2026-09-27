@@ -8,7 +8,6 @@ use std::{
 };
 
 const LABEL: &str = "io.github.priyanshuupadhyay.yelo-hud";
-const LEGACY: &str = "work.example.usage-hud";
 
 struct Report {
     failed: bool,
@@ -158,7 +157,6 @@ fn liveness(report: &mut Report, home: &Path) {
     match loaded(&label){
         Some(Some(pid))=>report.pass(&format!("{label} running (pid {pid})")),
         Some(None)=>report.fail(&format!("{label} loaded but not running — check {}",home.join("Library/Logs/yelo-hud.err.log").display())),
-        None if loaded(LEGACY).is_some()=>report.warn(&format!("{label} not loaded; the dotfiles job {LEGACY} still draws the HUD — cut over with yelo hud install, then yelo hud start")),
         None=>report.fail(&format!("{label} not loaded — the usage HUD is not running (yelo hud install, then yelo hud start)")),
     }
     for (kind, path) in [

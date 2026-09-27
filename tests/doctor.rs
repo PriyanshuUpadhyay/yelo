@@ -11,7 +11,6 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 const HUD_LABEL: &str = "io.github.priyanshuupadhyay.yelo-hud";
-const LEGACY_PLIST: &str = "work.example.usage-hud.plist";
 const USAGE_LINKS: [&str; 2] = ["usage-hud-data", "usage-hud-fetch"];
 fn home(bench: &Bench) -> &Path {
     &bench.temp.home
@@ -218,16 +217,10 @@ fn test_doctor_reports_profile_mirror_drift_without_repairing_it() {
 fn hud_dotfiles(bench: &Bench) -> PathBuf {
     let root = home(bench).join("dotfiles");
     let binaries = root.join("home/.local/bin");
-    let agents = root.join("home/Library/LaunchAgents");
     mkdir(&binaries);
-    mkdir(&agents);
     for name in USAGE_LINKS {
         write(&binaries.join(name), "#!/bin/sh\n");
     }
-    write_plist(
-        &agents.join(LEGACY_PLIST),
-        &json!({"Label": "work.example.usage-hud"}),
-    );
     root
 }
 fn link_usage_commands(bench: &Bench, root: &Path) {
@@ -237,15 +230,6 @@ fn link_usage_commands(bench: &Bench, root: &Path) {
         symlink(root.join("home/.local/bin").join(name), binaries.join(name)).unwrap();
     }
 }
-fn link_legacy_agent(bench: &Bench, root: &Path) {
-    let agents = home(bench).join("Library/LaunchAgents");
-    mkdir(&agents);
-    symlink(
-        root.join("home/Library/LaunchAgents").join(LEGACY_PLIST),
-        agents.join(LEGACY_PLIST),
-    )
-    .unwrap();
-}
 
 #[test]
 fn test_doctor_hud_matrix() {
@@ -253,38 +237,15 @@ fn test_doctor_hud_matrix() {
         (
             "before-cutover",
             true,
-            true,
             false,
-            ("owned-by-dotfiles", "owned-by-dotfiles"),
-            0,
-        ),
-        (
-            "both-installed",
-            true,
-            true,
-            true,
-            ("owned-by-dotfiles", "owned-by-dotfiles"),
-            0,
-        ),
-        ("after-cutover", false, false, true, ("ok", "ok"), 0),
-        (
-            "nothing-installed",
-            false,
-            false,
-            false,
-            ("ok", "missing"),
+            ("owned-by-dotfiles", "missing"),
             1,
         ),
-        (
-            "agent-only",
-            false,
-            true,
-            false,
-            ("ok", "owned-by-dotfiles"),
-            0,
-        ),
+        ("both-installed", true, true, ("owned-by-dotfiles", "ok"), 0),
+        ("after-cutover", false, true, ("ok", "ok"), 0),
+        ("nothing-installed", false, false, ("ok", "missing"), 1),
     ];
-    for (name, links, legacy, yelo_pair, expected, code) in cases {
+    for (name, links, yelo_pair, expected, code) in cases {
         let bench = Bench::new();
         let root = hud_dotfiles(&bench);
         let root_string = root.display().to_string();
@@ -298,9 +259,6 @@ fn test_doctor_hud_matrix() {
         );
         if links {
             link_usage_commands(&bench, &root);
-        }
-        if legacy {
-            link_legacy_agent(&bench, &root);
         }
         if yelo_pair {
             install_hud_targets(&bench);
@@ -320,14 +278,7 @@ fn test_doctor_hud_matrix() {
             links,
             "{name}"
         );
-        assert_eq!(
-            detail(&result, "hud").contains(LEGACY_PLIST),
-            legacy,
-            "{name}"
-        );
-        if !legacy {
-            assert!(detail(&result, "hud").contains(HUD_LABEL), "{name}");
-        }
+        assert!(detail(&result, "hud").contains(HUD_LABEL), "{name}");
     }
 }
 

@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const YELO_LABEL: &str = "io.github.priyanshuupadhyay.yelo-hud";
-const LEGACY_LABEL: &str = "work.example.usage-hud";
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -90,7 +89,7 @@ impl DoctorBench {
                 common::sealed_path()
             ),
         );
-        env.insert("FAKE_LOADED".into(), LEGACY_LABEL.into());
+        env.insert("FAKE_LOADED".into(), YELO_LABEL.into());
         Self {
             api_cache: api.join(".usage-hud-api-cache.json"),
             rollout: rollout_path(&rollout),
@@ -161,13 +160,7 @@ fn test_doctor_matrix() {
     assert!(!stdout(&leak).contains("eyJhbGciOi"));
     assert_eq!(leak.status.code(), Some(1));
     fs::remove_file(leaked).unwrap();
-    let warned = bench.doctor(&[]);
-    assert!(stdout(&warned).contains(&format!(
-        "WARN: {YELO_LABEL} not loaded; the dotfiles job {LEGACY_LABEL}"
-    )));
-    assert_eq!(warned.status.code(), Some(0));
-    let loaded = format!("{YELO_LABEL},{LEGACY_LABEL}");
-    let running = bench.doctor(&[("FAKE_LOADED", &loaded)]);
+    let running = bench.doctor(&[]);
     assert!(stdout(&running).contains(&format!("PASS: {YELO_LABEL} running (pid 4242)")));
     assert_eq!(running.status.code(), Some(0));
     let neither = bench.doctor(&[("FAKE_LOADED", "")]);
