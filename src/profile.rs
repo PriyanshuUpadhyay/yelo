@@ -247,9 +247,6 @@ pub(crate) fn keychain_service(home: &Path, name: &str) -> String {
 }
 
 fn reset_hours(text: &str) -> Option<f64> {
-    if text == "now" {
-        return Some(0.0);
-    }
     let mut total = 0.0;
     let mut digits = String::new();
     let mut found = false;
