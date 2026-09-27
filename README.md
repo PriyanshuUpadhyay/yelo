@@ -4,11 +4,11 @@ Claude and Codex account profiles, with a local usage HUD for macOS.
 
 Use `claude` or `codex` normally. New sessions automatically select an account from
 its available usage. Add `--profile` to choose from a menu, or `--profile NAME` to
-select an account directly. Setup installs the selector separately from Yelo.
+select an account directly. Setup adds a small zsh integration that calls `yelo`.
 
 ## Install
 
-Requirements: Python 3.11 or newer, `uv`, and the Claude or Codex CLI you use.
+Requirements: the Claude or Codex CLI you use. A source install needs Rust (`cargo`).
 UsageHUD also requires macOS 14 or newer and Swift 5.9 or newer. A Homebrew install
 also requires the Xcode Command Line Tools.
 
@@ -24,20 +24,17 @@ yelo hud install && yelo hud start
 
 Homebrew builds the CLI and the HUD app on your Mac during install; `yelo hud install`
 copies the app into `~/Applications`. Update with `brew upgrade priyanshuupadhyay/tap/yelo`.
-`yelo update` is for Git checkouts only.
 
 From a clone of this repository:
 
 ```sh
-uv tool install --editable .
-uv tool update-shell
+cargo install --path .
 yelo setup
 ```
 
 Open a new terminal after setup to load the profile integration. Setup supports zsh
-and adds its source line to `.zshrc`. Keep Python 3.11 or newer on PATH as `python3`.
-Keep the checkout in place: the editable install and HUD source build use it.
-Installing a wheel is not supported for the HUD.
+and adds its source line to `.zshrc`. Keep `~/.cargo/bin` on PATH. Keep the checkout
+in place, because `yelo hud install` builds the HUD from its `apps/UsageHUD`.
 
 ## Add accounts
 
@@ -111,12 +108,10 @@ In the shell integration, Codex's `--profile NAME` selects an **account**. Use
 `command codex --profile deep-review` bypasses the account wrapper entirely.
 The optional named shortcuts, such as `claude-work` and `codex-personal`, still work.
 
-`~/.config/yelo/shell.sh` and `profiles.pyz` contain the installed integration.
-Profile selection, menus, and session launches keep working after `uv tool uninstall
-yelo`, provided Python and the vendor CLIs remain installed. The archive contains its
-own copy of the selector code; it does not import the removed package or checkout.
-Creating new accounts through `claude profile create` or `codex profile create` still
-requires Yelo. Existing accounts are discovered each time, without regenerating a list.
+`~/.config/yelo/shell.sh` contains the installed integration. It calls the `yelo` on
+PATH for every selection. If `yelo` is not on PATH, `claude` and `codex` run the plain
+vendor CLI with no account selection. Existing accounts are discovered each time,
+without regenerating a list. Setup removes the `profiles.pyz` of older versions.
 
 Run `yelo setup` to update an older integration. It backs up a known generated shell
 file and preserves `_codex_host_guard`. To load it in the current terminal:
@@ -186,28 +181,15 @@ you need to diagnose a problem; the HUD does not run it.
 
 ## Update and remove
 
-```sh
-yelo update --check
-yelo update
-yelo update --hud
-```
-
-`update` fast-forwards the installed Git checkout from its configured upstream,
-reinstalls Yelo with `uv`, then runs the updated setup. It stops if there are local
-changes, no upstream, or a merge is needed. It does not switch branches or discard
-work. `--check` checks local prerequisites; it does not fetch remote updates.
-`--hud` also rebuilds an installed HUD and restarts it if it was running. A failed
-build leaves the running app alone. Claude and Codex are updated with their own
-installers.
-
-After a manual source update, run `yelo setup launchers`. For HUD changes, run
-`yelo hud install`, then stop and start the HUD. An extracted source archive has
-no Git upstream. Install a newer archive with
-`uv tool install --reinstall --editable PATH`, or use a Git clone for `yelo update`.
+Update a Homebrew install with `brew upgrade priyanshuupadhyay/tap/yelo`. Update a
+source install with `git pull`, then `cargo install --path .`. After either, run
+`yelo setup launchers`. For HUD changes, run `yelo hud install`, then stop and start
+the HUD. Claude and Codex are updated with their own installers.
 
 To remove the HUD, stop it first, then remove `~/Applications/UsageHUD.app` and
 `~/Library/LaunchAgents/io.github.priyanshuupadhyay.yelo-hud.plist`. To remove the CLI,
-run `uv tool uninstall yelo`. Account homes and credentials remain in place.
+run `brew uninstall yelo` or `cargo uninstall yelo`. Account homes and credentials
+remain in place.
 
 Yelo manages Claude and Codex profiles and UsageHUD only. It does not install Herdr
 configuration, plugins, worker scripts, runtime skills, or Prime Agent extensions.
@@ -215,30 +197,26 @@ Existing installations of those tools are independent of Yelo.
 
 ## Releases
 
-```sh
-yelo release
-yelo release --tag v0.5.1
-```
+Set the version in `Cargo.toml`, commit, then push a tag `vMAJOR.MINOR.PATCH` that
+matches it. The tag runs the checks, builds a source archive and its SHA-256 file with
+`git archive`, and creates a draft GitHub release with both files attached. A tag
+that does not match `Cargo.toml` fails the release. Review the draft before
+publishing it.
 
-Run this from a clean, committed checkout. The command creates a versioned source
-archive and SHA-256 file under `dist/`. It includes the Swift source and excludes
-untracked and ignored files. Existing release files are not overwritten. Nothing
-is published by this command. `--tag` also checks that the tag matches the project
-version and points at the current commit.
-
-The GitHub checks run Python tests on Linux and macOS and Swift tests on macOS.
-Pushing a `v*` tag runs these checks, prepares the archive, and creates a draft
-GitHub release with both files attached. Review the draft before publishing it.
-Set matching versions in `pyproject.toml` and `src/yelo/__init__.py` before tagging.
+The GitHub checks run the Rust and CLI tests on Linux and macOS and the Swift tests
+on macOS.
 
 ## Development
 
 ```sh
-uv run --with pytest pytest -q
+cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cargo build && uv run --no-project --with pytest python -m pytest tests -q
 swift test --package-path apps/UsageHUD
 ```
 
-Tests use temporary account homes and test credentials. The fetch tests use a local
+The pytest suite is black-box: it runs `target/debug/yelo`, or the command in
+`YELO_CMD`, against the goldens in `tests/golden/cli`. Tests use temporary account
+homes and test credentials. The fetch tests use a local
 HTTP server. Swift tests cover usage parsing, history, layout, and the HUD's local
 read command. Source files under `docs/decisions` record earlier project decisions;
 the scope above describes the current product.
