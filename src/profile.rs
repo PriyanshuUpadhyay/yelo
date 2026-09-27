@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -209,21 +210,25 @@ fn add_signed_in(cli: &str, rows: &mut [Row]) {
             let security =
                 env::var("AGENT_PROFILES_SECURITY_BIN").unwrap_or_else(|_| "security".into());
             let user = env::var("USER").unwrap_or_default();
+            let service = keychain_service(&home(), row.name.as_deref().unwrap_or_default());
             row.signed_in = Some(
                 Command::new(&security)
-                    .args([
-                        "find-generic-password",
-                        "-s",
-                        "Claude Code-credentials",
-                        "-a",
-                        &user,
-                    ])
+                    .args(["find-generic-password", "-s", &service, "-a", &user])
                     .output()
                     .is_ok_and(|o| o.status.success()),
             );
         }
     }
 }
+fn keychain_service(home: &Path, name: &str) -> String {
+    let identity = home.join(format!(".claude-{name}"));
+    let hash = Sha256::digest(identity.to_string_lossy().as_bytes());
+    format!(
+        "Claude Code-credentials-{:02x}{:02x}{:02x}{:02x}",
+        hash[0], hash[1], hash[2], hash[3]
+    )
+}
+
 fn render(header: Vec<&str>, body: Vec<Vec<String>>) -> String {
     let widths: Vec<_> = (0..header.len())
         .map(|i| {
@@ -278,6 +283,113 @@ fn command_list(cli: &str, json: bool) -> i32 {
     print!("{}", render(header, body));
     0
 }
+fn emit_row(row: &Row, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string(row).unwrap());
+    } else {
+        println!("{}\t{}", row.name.as_deref().unwrap_or(""), row.dir);
+    }
+}
+fn resolve(cli: &str, query: &str) -> Result<Row, (String, i32, Vec<Row>)> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err((format!("{cli}: empty profile name"), 2, Vec::new()));
+    }
+    let found = rows(cli, true);
+    let select =
+        |matches: Vec<Row>, reason: &str| -> Result<Option<Row>, (String, i32, Vec<Row>)> {
+            if matches.len() == 1 {
+                Ok(matches.into_iter().next())
+            } else if matches.is_empty() {
+                Ok(None)
+            } else {
+                Err((format!("{cli}: '{query}' matches {reason}"), 2, matches))
+            }
+        };
+    if let Some(row) = select(
+        found
+            .iter()
+            .filter(|r| r.name.as_deref() == Some(query))
+            .cloned()
+            .collect(),
+        "several profiles by name",
+    )? {
+        return Ok(row);
+    }
+    if cli == "claude"
+        && let Some(target) = aliases(&claude_root())
+            .iter()
+            .rev()
+            .find(|(old, _)| old == query)
+            .map(|(_, new)| new)
+        && let Some(row) = select(
+            found
+                .iter()
+                .filter(|r| r.name.as_deref() == Some(target.as_str()))
+                .cloned()
+                .collect(),
+            "several profiles by alias",
+        )?
+    {
+        return Ok(row);
+    }
+    let lower = query.to_lowercase();
+    if let Some(row) = select(
+        found
+            .iter()
+            .filter(|r| {
+                r.email
+                    .as_deref()
+                    .is_some_and(|s| s.to_lowercase() == lower)
+            })
+            .cloned()
+            .collect(),
+        "several profiles by email",
+    )? {
+        return Ok(row);
+    }
+    if let Some(row) = select(
+        found
+            .iter()
+            .filter(|r| {
+                r.name
+                    .as_deref()
+                    .is_some_and(|s| s.to_lowercase().contains(&lower))
+                    || r.email
+                        .as_deref()
+                        .is_some_and(|s| s.to_lowercase().contains(&lower))
+            })
+            .cloned()
+            .collect(),
+        "several profiles",
+    )? {
+        return Ok(row);
+    }
+    Err((
+        format!("{cli}: no profile matches '{query}'"),
+        1,
+        Vec::new(),
+    ))
+}
+fn command_resolve(cli: &str, query: &str, json: bool) -> i32 {
+    match resolve(cli, query) {
+        Ok(row) => {
+            emit_row(&row, json);
+            0
+        }
+        Err((message, code, candidates)) => {
+            eprintln!("{message}");
+            for row in candidates {
+                eprintln!(
+                    "  {}\t{}",
+                    row.name.as_deref().unwrap_or("-"),
+                    row.email.as_deref().unwrap_or("-")
+                );
+            }
+            code
+        }
+    }
+}
 pub fn run(args: &[String]) -> i32 {
     if args.first().map(String::as_str) != Some("profile") {
         eprintln!(
@@ -295,9 +407,24 @@ pub fn run(args: &[String]) -> i32 {
     let json = args.iter().any(|a| a == "--json");
     match action {
         "list" => command_list(cli, json),
+        "resolve" => command_resolve(cli, args.last().map(String::as_str).unwrap_or(""), json),
         _ => {
             eprintln!("yelo: profile {action}: not ported yet");
             2
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keychain_service;
+    use std::path::Path;
+
+    #[test]
+    fn keychain_service_matches_python() {
+        assert_eq!(
+            keychain_service(Path::new("/h"), "pri"),
+            "Claude Code-credentials-d36dbee4"
+        );
     }
 }
