@@ -477,3 +477,179 @@ pub fn run(args: &[String]) -> i32 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Pick, consider, label, window_label};
+    use crate::profile::Row;
+    use serde_json::json;
+
+    #[test]
+    fn window_label_cases() {
+        for (minutes, expected) in [
+            (300, "5h"),
+            (10080, "7d"),
+            (4320, "3d"),
+            (120, "2h"),
+            (90, "2h"),
+            (0, "fallback"),
+        ] {
+            assert_eq!(window_label(&json!(minutes), "fallback"), expected);
+        }
+    }
+
+    #[test]
+    fn pick_window_order_and_slack() {
+        let now = 1_000_000;
+        let mut pick = Pick::default();
+        consider(
+            &mut pick,
+            90,
+            now + 100,
+            Some(now - 10),
+            Some(now - 10),
+            "statusline",
+            (now, 900),
+        );
+        consider(
+            &mut pick,
+            10,
+            now + 5000,
+            Some(now - 10),
+            Some(now - 10),
+            "api",
+            (now, 900),
+        );
+        assert_eq!(pick.pct, Some(10));
+        let mut pick = Pick::default();
+        consider(
+            &mut pick,
+            10,
+            now + 5000,
+            Some(now - 10),
+            Some(now - 10),
+            "api",
+            (now, 900),
+        );
+        consider(
+            &mut pick,
+            90,
+            now + 100,
+            Some(now - 10),
+            Some(now - 10),
+            "statusline",
+            (now, 900),
+        );
+        assert_eq!(pick.pct, Some(10));
+        let mut pick = Pick::default();
+        consider(
+            &mut pick,
+            10,
+            now + 5000,
+            Some(now - 10),
+            Some(now - 10),
+            "api",
+            (now, 900),
+        );
+        consider(
+            &mut pick,
+            80,
+            now + 5119,
+            Some(now - 400),
+            Some(now - 400),
+            "statusline",
+            (now, 900),
+        );
+        assert_eq!(pick.pct, Some(80));
+        let mut pick = Pick::default();
+        consider(
+            &mut pick,
+            10,
+            now + 5000,
+            Some(now - 10),
+            Some(now - 10),
+            "api",
+            (now, 900),
+        );
+        consider(
+            &mut pick,
+            1,
+            now + 5121,
+            Some(now - 400),
+            Some(now - 400),
+            "statusline",
+            (now, 900),
+        );
+        assert_eq!(pick.pct, Some(1));
+        let mut pick = Pick::default();
+        consider(
+            &mut pick,
+            50,
+            now + 5000,
+            Some(now - 5000),
+            Some(now - 5000),
+            "statusline",
+            (now, 900),
+        );
+        consider(
+            &mut pick,
+            50,
+            now + 5000,
+            Some(now - 5000),
+            Some(now - 10),
+            "api",
+            (now, 900),
+        );
+        assert_eq!(pick.source, "api");
+        let mut pick = Pick::default();
+        consider(
+            &mut pick,
+            50,
+            now + 5000,
+            Some(now - 100),
+            Some(now - 100),
+            "statusline",
+            (now, 900),
+        );
+        consider(
+            &mut pick,
+            50,
+            now + 5000,
+            Some(now - 10),
+            Some(now - 10),
+            "api",
+            (now, 900),
+        );
+        assert_eq!(pick.source, "api");
+    }
+
+    fn row(name: Option<&str>, email: Option<&str>) -> Row {
+        Row {
+            name: name.map(str::to_owned),
+            dir: String::new(),
+            email: email.map(str::to_owned),
+            plan: None,
+            signed_in: None,
+            aliases: Vec::new(),
+            usage: None,
+            remaining: None,
+            urgency: None,
+            fable_exhausted: None,
+        }
+    }
+
+    #[test]
+    fn hud_label_prefers_email_and_falls_back_to_name() {
+        assert_eq!(
+            label("claude", &row(Some("pri"), Some("person@example.test"))),
+            "cl·person@example.test"
+        );
+        assert_eq!(label("claude", &row(Some("pri"), None)), "cl·pri");
+        assert_eq!(
+            label("codex", &row(Some("work"), Some("person@example.test"))),
+            "cx·person@example.test"
+        );
+        assert_eq!(label("codex", &row(Some("work"), None)), "cx·work");
+        assert_eq!(label("codex", &row(None, None)), "cx");
+    }
+}

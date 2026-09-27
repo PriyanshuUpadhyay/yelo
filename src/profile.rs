@@ -270,6 +270,32 @@ fn reset_hours(text: &str) -> Option<f64> {
 fn span(window: &str) -> f64 {
     if window == "5h" { 5.0 } else { 168.0 }
 }
+fn urgency(windows: &[(&str, f64, Option<f64>)]) -> f64 {
+    windows
+        .iter()
+        .map(|(window, used, hours)| {
+            let fraction = hours.map_or(1.0, |h| (h / span(window)).clamp(0.02, 1.0));
+            ((100.0 - used) / 100.0) / fraction
+        })
+        .fold(0.0, f64::max)
+}
+fn usage_data_labels(cli: &str, row: &Row) -> Vec<String> {
+    let primary = crate::usage::label(cli, row);
+    let legacy = row
+        .name
+        .as_ref()
+        .map(|n| format!("{}·{n}", if cli == "claude" { "cl" } else { "cx" }));
+    let mut labels = vec![primary];
+    if let Some(legacy) = legacy
+        && !labels.contains(&legacy)
+    {
+        labels.push(legacy);
+    }
+    if cli == "codex" && row.dir.ends_with("/.codex") {
+        labels.push("cx".into());
+    }
+    labels
+}
 fn cache_windows(
     cli: &str,
     row: &Row,
@@ -425,21 +451,7 @@ fn add_usage(
     for row in rows {
         let mut windows = Vec::new();
         if let Some(data) = snapshot {
-            let primary = crate::usage::label(cli, row);
-            let legacy = row
-                .name
-                .as_ref()
-                .map(|n| format!("{}·{n}", if cli == "claude" { "cl" } else { "cx" }));
-            let mut labels = vec![primary];
-            if let Some(legacy) = legacy
-                && !labels.contains(&legacy)
-            {
-                labels.push(legacy);
-            }
-            if cli == "codex" && row.dir.ends_with("/.codex") {
-                labels.push("cx".into());
-            }
-            for label in labels {
+            for label in usage_data_labels(cli, row) {
                 let matched: Vec<_> = data
                     .iter()
                     .filter(|r| r["provider"] == cli && r["label"] == label)
@@ -512,18 +524,13 @@ fn add_usage(
                 .min()
                 .unwrap_or(100)
         ));
-        let ranked: Vec<_> = if include_fable && windows.iter().any(|(w, _, _)| w == "fb") {
-            windows.iter().filter(|(w, _, _)| w == "fb").collect()
-        } else {
-            windows.iter().collect()
-        };
-        let score = ranked
-            .into_iter()
-            .map(|(window, used, hours)| {
-                let fraction = hours.map_or(1.0, |h| (h / span(window)).clamp(0.02, 1.0));
-                ((100.0 - used) / 100.0) / fraction
-            })
-            .fold(0.0, f64::max);
+        let only_fable = include_fable && windows.iter().any(|(w, _, _)| w == "fb");
+        let ranked: Vec<_> = windows
+            .iter()
+            .filter(|(window, _, _)| !only_fable || window == "fb")
+            .map(|(window, used, hours)| (window.as_str(), *used, *hours))
+            .collect();
+        let score = urgency(&ranked);
         row.urgency = Some(serde_json::json!((score * 1000.0).round() / 1000.0));
     }
 }
@@ -1180,14 +1187,81 @@ fn command_codex_model(args: &[String]) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::keychain_service;
+    use super::{Row, claude_email, keychain_service, reset_hours, urgency, usage_data_labels};
+    use std::fs;
     use std::path::Path;
 
     #[test]
-    fn keychain_service_matches_python() {
+    fn keychain_service_matches_path_digest() {
         assert_eq!(
             keychain_service(Path::new("/h"), "pri"),
             "Claude Code-credentials-d36dbee4"
+        );
+        assert_ne!(
+            keychain_service(Path::new("/h"), "pri"),
+            keychain_service(Path::new("/h"), "work")
+        );
+    }
+
+    #[test]
+    fn reset_hours_forms_and_unreadable() {
+        assert_eq!(reset_hours("3d23h"), Some(95.0));
+        assert_eq!(reset_hours("1h19m"), Some(1.0 + 19.0 / 60.0));
+        assert_eq!(reset_hours("4m"), Some(4.0 / 60.0));
+        for text in ["now", "?", "", "5x"] {
+            assert_eq!(reset_hours(text), None);
+        }
+        assert_eq!(None::<&str>.and_then(reset_hours), None);
+    }
+
+    #[test]
+    fn urgency_cases() {
+        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-10);
+        close(urgency(&[("5h", 0.0, Some(5.0))]), 1.0);
+        close(urgency(&[("5h", 17.0, Some(1.0))]), 0.83 / 0.2);
+        close(
+            urgency(&[("5h", 0.0, Some(5.0)), ("7d", 41.0, Some(40.0))]),
+            0.59 / (40.0 / 168.0),
+        );
+        close(urgency(&[("7d", 30.0, None)]), 0.7);
+        close(urgency(&[("5h", 0.0, Some(0.001))]), 1.0 / 0.02);
+    }
+
+    #[test]
+    fn claude_email_prefers_login_identity() {
+        let path = std::env::temp_dir().join(format!("yelo-email-{}", std::process::id()));
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("email"), "before@example.test\n").unwrap();
+        fs::write(
+            path.join(".claude.json"),
+            r#"{"oauthAccount":{"emailAddress":"login@example.test"}}"#,
+        )
+        .unwrap();
+        assert_eq!(claude_email(&path).as_deref(), Some("login@example.test"));
+        fs::write(path.join(".claude.json"), r#"{"oauthAccount":null}"#).unwrap();
+        assert_eq!(claude_email(&path).as_deref(), Some("before@example.test"));
+        fs::remove_file(path.join("email")).unwrap();
+        assert_eq!(claude_email(&path), None);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn usage_data_labels_keep_email_and_name() {
+        let row = Row {
+            name: Some("pri".into()),
+            dir: String::new(),
+            email: Some("person@example.test".into()),
+            plan: None,
+            signed_in: None,
+            aliases: Vec::new(),
+            usage: None,
+            remaining: None,
+            urgency: None,
+            fable_exhausted: None,
+        };
+        assert_eq!(
+            usage_data_labels("claude", &row),
+            ["cl·person@example.test", "cl·pri"]
         );
     }
 }

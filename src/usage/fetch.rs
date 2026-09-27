@@ -306,15 +306,18 @@ fn normalize_window(value: &Value) -> Option<Value> {
         json!({"used_percent":rounded(used.clamp(0.0,100.0)),"window_minutes":rounded(minutes).max(0),"resets_at":rounded(reset)}),
     )
 }
+fn timeout_seconds() -> f64 {
+    env::var("USAGE_HUD_CODEX_FETCH_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|n| *n > 0.0)
+        .unwrap_or(25.0)
+}
 fn codex(row: &Row) -> (&'static str, bool) {
     let Some(bin) = codex_bin() else {
         return ("fetch-failed", false);
     };
-    let timeout = env::var("USAGE_HUD_CODEX_FETCH_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|n| *n > 0.0)
-        .unwrap_or(25.0);
+    let timeout = timeout_seconds();
     let mut child = match Command::new(bin)
         .args(["app-server", "--listen", "stdio://"])
         .env("CODEX_HOME", &row.dir)
@@ -432,4 +435,37 @@ pub(super) fn run() -> i32 {
         any |= ok;
     }
     if any { 0 } else { 1 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_window, timeout_seconds};
+    use serde_json::{Value, json};
+
+    #[test]
+    fn normalize_window_clamps_and_rejects_bad_input() {
+        assert_eq!(normalize_window(&Value::Null), Some(Value::Null));
+        assert_eq!(
+            normalize_window(&json!({"usedPercent":140,"windowDurationMins":10080,"resetsAt":1.6})),
+            Some(json!({"used_percent":100,"window_minutes":10080,"resets_at":2}))
+        );
+        assert_eq!(
+            normalize_window(&json!({"usedPercent":-5,"windowDurationMins":300,"resetsAt":10})),
+            Some(json!({"used_percent":0,"window_minutes":300,"resets_at":10}))
+        );
+        assert_eq!(normalize_window(&json!([1, 2])), None);
+        assert_eq!(
+            normalize_window(&json!({"usedPercent":null,"windowDurationMins":300,"resetsAt":10})),
+            None
+        );
+    }
+
+    #[test]
+    fn timeout_reads_variable_and_uses_default() {
+        unsafe { std::env::set_var("USAGE_HUD_CODEX_FETCH_TIMEOUT", "3.5") };
+        assert_eq!(timeout_seconds(), 3.5);
+        unsafe { std::env::set_var("USAGE_HUD_CODEX_FETCH_TIMEOUT", "not a number") };
+        assert_eq!(timeout_seconds(), 25.0);
+        unsafe { std::env::remove_var("USAGE_HUD_CODEX_FETCH_TIMEOUT") };
+    }
 }

@@ -336,3 +336,113 @@ pub(super) fn sync() -> i32 {
     }
     if drift.is_empty() { 0 } else { 1 }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::mirror_sync;
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt, symlink},
+    };
+
+    fn home(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("yelo-mirror-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(path.join(".claude")).unwrap();
+        path
+    }
+
+    #[test]
+    fn sync_is_idempotent_and_uses_relative_links() {
+        let home = home("links");
+        let shared = home.join(".claude");
+        fs::write(shared.join("settings.json"), "{}\n").unwrap();
+        fs::write(shared.join(".update.lock"), "locked\n").unwrap();
+        fs::write(shared.join(".usage-cache.json"), "shared junk\n").unwrap();
+        fs::write(shared.join(".claude.json"), "not the account config\n").unwrap();
+        fs::write(
+            home.join(".claude.json"),
+            r#"{"oauthAccount":{"id":"base"},"theme":"dark","trusted":true}"#,
+        )
+        .unwrap();
+        assert!(mirror_sync("sid", &home).unwrap().is_empty());
+        let profile = shared.join(".profiles/sid");
+        assert_eq!(
+            fs::metadata(&profile).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::read_link(profile.join("settings.json"))
+                .unwrap()
+                .to_str(),
+            Some("../../settings.json")
+        );
+        assert_eq!(
+            fs::read_link(profile.join(".update.lock"))
+                .unwrap()
+                .to_str(),
+            Some("../../.update.lock")
+        );
+        assert!(!profile.join(".usage-cache.json").exists());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &fs::read(profile.join(".claude.json")).unwrap()
+            )
+            .unwrap(),
+            serde_json::json!({"theme":"dark","trusted":true})
+        );
+        assert_eq!(
+            fs::metadata(profile.join(".claude.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(mirror_sync("sid", &home).unwrap().is_empty());
+        let invalid = b"{not json\xff";
+        fs::write(home.join(".claude.json"), invalid).unwrap();
+        assert!(mirror_sync("broken", &home).unwrap().is_empty());
+        assert_eq!(
+            fs::read(shared.join(".profiles/broken/.claude.json")).unwrap(),
+            invalid
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn sync_reports_drift_and_keeps_config() {
+        let home = home("drift");
+        let shared = home.join(".claude");
+        let profile = shared.join(".profiles/sid");
+        fs::create_dir_all(&profile).unwrap();
+        fs::create_dir_all(shared.join("projects")).unwrap();
+        fs::write(shared.join("settings.json"), "{}\n").unwrap();
+        fs::write(home.join(".claude.json"), "{\"new\":true}\n").unwrap();
+        fs::create_dir_all(profile.join("projects")).unwrap();
+        fs::create_dir_all(profile.join("todos")).unwrap();
+        symlink("/missing", profile.join("settings.json")).unwrap();
+        fs::write(profile.join(".claude.json"), "{\"old\":true}\n").unwrap();
+        fs::write(profile.join("email"), "sid@example.test\n").unwrap();
+        fs::write(profile.join(".usage-api-cache.json"), "{}\n").unwrap();
+        assert_eq!(
+            mirror_sync("sid", &home).unwrap(),
+            vec![profile.join("projects"), profile.join("todos")]
+        );
+        assert_eq!(
+            fs::read_link(profile.join("settings.json"))
+                .unwrap()
+                .to_str(),
+            Some("../../settings.json")
+        );
+        assert_eq!(
+            fs::read_to_string(profile.join(".claude.json")).unwrap(),
+            "{\"old\":true}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(profile.join("email")).unwrap(),
+            "sid@example.test\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+}

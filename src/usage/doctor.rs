@@ -307,3 +307,20 @@ pub(super) fn run() -> i32 {
     leaks(&mut report, &home, &accounts);
     if report.failed { 1 } else { 0 }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Report, freshness};
+    use serde_json::json;
+
+    #[test]
+    fn freshness_rejects_pct_on_offline_row() {
+        let mut report = Report { failed: false };
+        freshness(
+            &mut report,
+            &[json!({"label":"cl·pri","window":"5h","state":"offline","pct":43})],
+            1_900_000_000,
+        );
+        assert!(report.failed);
+    }
+}
