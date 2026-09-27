@@ -19,13 +19,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v10.0.1
-        with:
-          python-version: '3.11'
       - name: Prepare source archive
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: uv run yelo release --tag "$RELEASE_TAG"
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "$RELEASE_TAG" != "v$version" ]; then
+            echo "tag $RELEASE_TAG does not match Cargo.toml version $version" >&2
+            exit 1
+          fi
+          mkdir dist
+          git archive --format=tar.gz --prefix="yelo-$version/" --output="dist/yelo-$version.tar.gz" HEAD
+          (cd dist && sha256sum "yelo-$version.tar.gz" > "yelo-$version.sha256")
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}

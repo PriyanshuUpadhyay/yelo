@@ -17,10 +17,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build
+      # The CLI tests are black-box: Python and pytest drive target/debug/yelo.
       - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: '3.11'
-      - run: uv tool install --editable .
-      - run: uv run --with pytest pytest -q
+      - run: uv run --no-project --with pytest python -m pytest tests -q
       - if: runner.os == 'macOS'
         run: swift test --package-path apps/UsageHUD
