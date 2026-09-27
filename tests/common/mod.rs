@@ -434,6 +434,30 @@ pub fn run_yelo(args: &[&str], env: &Env, cwd: Option<&Path>, stdin: &str) -> Ou
     child.wait_with_output().unwrap()
 }
 
+pub fn stdout(output: &Output) -> String {
+    String::from_utf8(output.stdout.clone()).unwrap()
+}
+
+pub fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).unwrap()
+}
+
+pub struct Fixture {
+    pub temp: TestHome,
+}
+
+impl Fixture {
+    pub fn new() -> Self {
+        let temp = TestHome::new();
+        build_fixture_home(&temp.home);
+        Self { temp }
+    }
+
+    pub fn run(&self, args: &[&str]) -> Output {
+        run_yelo(args, &fixture_env(&self.temp.home, FALSE_BIN), None, "")
+    }
+}
+
 pub struct Bench {
     pub temp: TestHome,
     pub dotfiles: PathBuf,
