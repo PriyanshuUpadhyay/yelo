@@ -390,6 +390,64 @@ fn command_resolve(cli: &str, query: &str, json: bool) -> i32 {
         }
     }
 }
+fn command_menu(cli: &str) -> i32 {
+    let mut found = rows(cli, true);
+    if found.is_empty() {
+        eprintln!("{cli}: no profiles found");
+        return 1;
+    }
+    add_signed_in(cli, &mut found);
+    let mut body = Vec::new();
+    for row in &found {
+        let mut cells = vec![
+            row.name.as_deref().unwrap_or("-").to_owned(),
+            row.email.as_deref().unwrap_or("-").to_owned(),
+        ];
+        if cli == "codex" {
+            cells.push(row.plan.as_deref().unwrap_or("-").to_owned());
+        }
+        cells.push(
+            if row.signed_in == Some(false) {
+                "not signed in"
+            } else {
+                "no data"
+            }
+            .to_owned(),
+        );
+        body.push(cells);
+    }
+    let blank = vec![""; body[0].len()];
+    let formatted = render(blank, body);
+    for (index, (row, line)) in found.iter().zip(formatted.lines().skip(1)).enumerate() {
+        println!(
+            "{}\t{}\t{}\t{}",
+            index + 1,
+            row.name.as_deref().unwrap_or(""),
+            row.dir,
+            line
+        );
+    }
+    0
+}
+fn command_pick(cli: &str, json: bool) -> i32 {
+    let mut found = rows(cli, true);
+    add_signed_in(cli, &mut found);
+    found.retain(|row| row.signed_in == Some(true));
+    match found.as_slice() {
+        [] => {
+            eprintln!("{cli}: no signed-in account to pick from");
+            1
+        }
+        [row] => {
+            emit_row(row, json);
+            0
+        }
+        _ => {
+            eprintln!("{cli}: no usage data to pick an account from");
+            1
+        }
+    }
+}
 pub fn run(args: &[String]) -> i32 {
     if args.first().map(String::as_str) != Some("profile") {
         eprintln!(
@@ -408,6 +466,8 @@ pub fn run(args: &[String]) -> i32 {
     match action {
         "list" => command_list(cli, json),
         "resolve" => command_resolve(cli, args.last().map(String::as_str).unwrap_or(""), json),
+        "menu" => command_menu(cli),
+        "pick" => command_pick(cli, json),
         _ => {
             eprintln!("yelo: profile {action}: not ported yet");
             2
