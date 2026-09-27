@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "usage",
+    "doctor"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": "\n— usage meter —\nPASS: pri caches well-formed (3 file(s), 6 window(s))\nWARN: work: no usage cache files — nothing feeds the HUD for this profile\n  row: cl·pri@example.test 5h — ok, seen 30s ago\n  row: cl·pri@example.test 7d — ok, seen 2m ago\n  row: cl·pri@example.test fb — ok, seen 2m ago\n  row: cl·work@example.test - — offline, never confirmed\n  row: cx·base@example.test 7d — ok, seen 60s ago\n  row: cx·alt@example.test 7d — ok, seen 0s ago\nPASS: 5 of 6 row(s) current (1 without data)\nPASS: no row without usable data carries a pct\nPASS: io.github.priyanshuupadhyay.yelo-hud running (pid 80156)\nWARN: HUD bundle absent: $HOME/Applications/UsageHUD.app/Contents/MacOS/UsageHUD (yelo hud install writes it)\nWARN: HUD LaunchAgent absent: $HOME/Library/LaunchAgents/io.github.priyanshuupadhyay.yelo-hud.plist (yelo hud install writes it)\nWARN: pri: no OAuth credential source — API refresh reports fetch-failed (statusline caches still feed the HUD)\nWARN: work: no OAuth credential source — API refresh reports fetch-failed (statusline caches still feed the HUD)\n\n— codex usage meter —\nPASS: cx·base@example.test 7d: current from api\nPASS: cx·alt@example.test 7d: current from rollout\n\n— token-leak scan —\nPASS: no token material in 4 pipeline-written file(s)\n",
+  "stderr": ""
+}

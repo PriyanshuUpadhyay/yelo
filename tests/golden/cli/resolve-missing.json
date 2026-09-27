@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "resolve",
+    "--cli",
+    "claude",
+    "--",
+    "zzz"
+  ],
+  "home": "fixture",
+  "exit": 1,
+  "stdout": "",
+  "stderr": "claude: no profile matches 'zzz'\n"
+}

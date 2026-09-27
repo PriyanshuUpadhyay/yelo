@@ -1,0 +1,28 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "claude",
+    "--json"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": [
+    {
+      "name": "pri",
+      "dir": "$HOME/.claude/.profiles/pri",
+      "email": "pri@example.test",
+      "aliases": [],
+      "signed_in": false
+    },
+    {
+      "name": "work",
+      "dir": "$HOME/.claude/.profiles/work",
+      "email": "work@example.test",
+      "aliases": [],
+      "signed_in": false
+    }
+  ],
+  "stderr": ""
+}

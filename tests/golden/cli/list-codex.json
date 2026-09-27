@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "codex"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "NAME  EMAIL              PLAN\nbase  base@example.test  pro\nalt   alt@example.test   plus\n",
+  "stderr": ""
+}

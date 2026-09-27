@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "profile",
+    "pick",
+    "--cli",
+    "claude",
+    "--json"
+  ],
+  "home": "fixture",
+  "exit": 1,
+  "stdout": "",
+  "stderr": "claude: no signed-in account to pick from\n"
+}

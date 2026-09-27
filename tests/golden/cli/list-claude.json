@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "claude"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "NAME  EMAIL\npri   pri@example.test\nwork  work@example.test\n",
+  "stderr": ""
+}

@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "resolve",
+    "--cli",
+    "claude",
+    "--",
+    "wor"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "work\t$HOME/.claude/.profiles/work\n",
+  "stderr": ""
+}

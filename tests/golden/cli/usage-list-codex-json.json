@@ -1,0 +1,37 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "codex",
+    "--usage",
+    "--json"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": [
+    {
+      "name": null,
+      "dir": "$HOME/.codex",
+      "email": "base@example.test",
+      "plan": "pro",
+      "signed_in": true,
+      "aliases": [],
+      "usage": "7d 70% left",
+      "remaining": 70,
+      "urgency": 4.523
+    },
+    {
+      "name": "alt",
+      "dir": "$HOME/.codex-alt",
+      "email": "alt@example.test",
+      "plan": "plus",
+      "signed_in": true,
+      "aliases": [],
+      "usage": "7d 82% left",
+      "remaining": 82,
+      "urgency": 5.298
+    }
+  ],
+  "stderr": ""
+}

@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "resolve",
+    "--cli",
+    "claude",
+    "--",
+    "e"
+  ],
+  "home": "fixture",
+  "exit": 2,
+  "stdout": "",
+  "stderr": "claude: 'e' matches several profiles\n  pri\tpri@example.test\n  work\twork@example.test\n"
+}

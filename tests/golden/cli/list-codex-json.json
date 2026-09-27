@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "codex",
+    "--json"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": [
+    {
+      "name": "base",
+      "dir": "$HOME/.codex",
+      "email": "base@example.test",
+      "plan": "pro",
+      "signed_in": true,
+      "aliases": []
+    },
+    {
+      "name": "alt",
+      "dir": "$HOME/.codex-alt",
+      "email": "alt@example.test",
+      "plan": "plus",
+      "signed_in": true,
+      "aliases": []
+    }
+  ],
+  "stderr": ""
+}

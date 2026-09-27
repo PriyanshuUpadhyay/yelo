@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "claude",
+    "--usage"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": "NAME  EMAIL              USAGE\npri   pri@example.test   5h 57% left · 7d 88% left\nwork  work@example.test  no data\n",
+  "stderr": ""
+}

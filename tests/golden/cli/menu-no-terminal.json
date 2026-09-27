@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "profile",
+    "menu",
+    "--cli",
+    "claude"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "1\tpri\t$HOME/.claude/.profiles/pri\tpri   pri@example.test   not signed in\n2\twork\t$HOME/.claude/.profiles/work\twork  work@example.test  not signed in\n",
+  "stderr": ""
+}

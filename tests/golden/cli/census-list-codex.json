@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "codex"
+  ],
+  "home": "census",
+  "exit": 0,
+  "stdout": "NAME      EMAIL  PLAN\nbase      -      -\nalt       -      -\nnomarker  -      -\n",
+  "stderr": ""
+}

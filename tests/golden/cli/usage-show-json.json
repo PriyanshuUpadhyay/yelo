@@ -1,0 +1,72 @@
+{
+  "argv": [
+    "usage",
+    "show",
+    "--json"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": [
+    {
+      "label": "cl·pri@example.test",
+      "provider": "claude",
+      "window": "5h",
+      "state": "ok",
+      "pct": 43,
+      "reset": "21m",
+      "active": true,
+      "source": "statusline",
+      "canFetch": true
+    },
+    {
+      "label": "cl·pri@example.test",
+      "provider": "claude",
+      "window": "7d",
+      "state": "ok",
+      "pct": 12,
+      "reset": "3d1h",
+      "active": true,
+      "source": "api",
+      "canFetch": true
+    },
+    {
+      "label": "cl·pri@example.test",
+      "provider": "claude",
+      "window": "fb",
+      "state": "ok",
+      "pct": 5,
+      "reset": "3d1h",
+      "active": true,
+      "source": "api",
+      "canFetch": true
+    },
+    {
+      "label": "cl·work@example.test",
+      "provider": "claude",
+      "state": "offline",
+      "reason": "no data",
+      "canFetch": true
+    },
+    {
+      "label": "cx·base@example.test",
+      "provider": "codex",
+      "window": "7d",
+      "state": "ok",
+      "pct": 30,
+      "reset": "1d2h",
+      "source": "api",
+      "canFetch": false
+    },
+    {
+      "label": "cx·alt@example.test",
+      "provider": "codex",
+      "window": "7d",
+      "state": "ok",
+      "pct": 18,
+      "reset": "1d2h",
+      "source": "rollout",
+      "canFetch": false
+    }
+  ],
+  "stderr": ""
+}

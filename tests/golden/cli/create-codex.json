@@ -1,0 +1,41 @@
+{
+  "argv": [
+    "profile",
+    "create",
+    "--cli",
+    "codex",
+    "--yes",
+    "newone"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "Created profile 'newone'. Sign in with: codex-newone login\nWrote $HOME/.local/bin/codex-newone.\n",
+  "stderr": "",
+  "home_after": [
+    "D .claude 0o755",
+    "F .claude.json 0o644 1f9e109bae712a1e",
+    "D .codex 0o755",
+    "D .codex-alt 0o755",
+    "D .codex-newone 0o700",
+    "D .local 0o755",
+    "D .prime 0o755",
+    "D .claude/.profiles 0o755",
+    "D .claude/.profiles/pri 0o755",
+    "D .claude/.profiles/work 0o755",
+    "F .claude/.profiles/pri/email 0o644 6409d866f690a603",
+    "F .claude/.profiles/work/email 0o644 eab7bb8f4f8753d8",
+    "F .codex/auth.json 0o644 4fd95a668faa4849",
+    "F .codex/config.toml 0o644 66d1536d2020e974",
+    "F .codex/profile-label 0o644 f34848ca92665c34",
+    "D .codex/sessions 0o755",
+    "F .codex-alt/auth.json 0o644 ee44823616afce0e",
+    "F .codex-alt/config.toml 0o644 66d1536d2020e974",
+    "D .codex-alt/sessions 0o755",
+    "F .codex-newone/config.toml 0o600 66d1536d2020e974",
+    "D .codex-newone/sessions 0o700",
+    "D .local/bin 0o755",
+    "F .local/bin/codex-newone 0o755 c6cb363487dbbde9",
+    "D .prime/agent-solo 0o755",
+    "F .prime/agent-solo/auth.json 0o644 8169ef6dc4f31d6c"
+  ]
+}

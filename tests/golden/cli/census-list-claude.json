@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "profile",
+    "list",
+    "--cli",
+    "claude"
+  ],
+  "home": "census",
+  "exit": 0,
+  "stdout": "NAME    EMAIL\npri     -\nwork-2  -\n",
+  "stderr": ""
+}

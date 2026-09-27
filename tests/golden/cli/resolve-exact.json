@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "resolve",
+    "--cli",
+    "claude",
+    "--",
+    "pri"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "pri\t$HOME/.claude/.profiles/pri\n",
+  "stderr": ""
+}

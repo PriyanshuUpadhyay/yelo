@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "doctor",
+    "--json"
+  ],
+  "home": "fixture",
+  "exit": 1,
+  "stdout": [
+    {
+      "step": "launchers",
+      "state": "missing",
+      "detail": "absent: $HOME/.local/bin/claude-pri; absent: $HOME/.local/bin/claude-work; absent: $HOME/.local/bin/codex-base; absent: $HOME/.local/bin/codex-alt; stale: $HOME/.config/yelo/profiles.pyz; stale: $HOME/.config/yelo/shell.sh; stale: $HOME/.zshrc"
+    },
+    {
+      "step": "profiles",
+      "state": "ok",
+      "detail": "$HOME/.claude/.profiles"
+    },
+    {
+      "step": "profile-mirrors",
+      "state": "missing",
+      "detail": "missing: $HOME/.claude/.profiles/pri/.claude.json; missing: $HOME/.claude/.profiles/work/.claude.json"
+    },
+    {
+      "step": "usage",
+      "state": "ok",
+      "detail": "no usage-hud-* link in $HOME/.local/bin"
+    },
+    {
+      "step": "hud",
+      "state": "missing",
+      "detail": "absent: $HOME/Library/LaunchAgents/io.github.priyanshuupadhyay.yelo-hud.plist"
+    }
+  ],
+  "stderr": ""
+}

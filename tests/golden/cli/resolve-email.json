@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "resolve",
+    "--cli",
+    "codex",
+    "--",
+    "alt@example.test"
+  ],
+  "home": "fixture",
+  "exit": 0,
+  "stdout": "alt\t$HOME/.codex-alt\n",
+  "stderr": ""
+}

@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "sessions",
+    "--cli",
+    "codex",
+    "--all",
+    "--json"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": [],
+  "stderr": ""
+}

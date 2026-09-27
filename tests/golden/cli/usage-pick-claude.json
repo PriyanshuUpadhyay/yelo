@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "profile",
+    "pick",
+    "--cli",
+    "claude",
+    "--json"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": {
+    "name": "pri",
+    "dir": "$HOME/.claude/.profiles/pri",
+    "email": "pri@example.test",
+    "aliases": [],
+    "signed_in": true,
+    "usage": "5h 57% left · 7d 88% left",
+    "remaining": 57,
+    "urgency": 8.143
+  },
+  "stderr": ""
+}

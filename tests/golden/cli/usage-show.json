@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "usage",
+    "show"
+  ],
+  "home": "usage",
+  "exit": 0,
+  "stdout": "LABEL                 WINDOW  PCT  RESET  STATE    SOURCE\ncl·pri@example.test   5h      43%  21m    ok       statusline\ncl·pri@example.test   7d      12%  3d1h   ok       api\ncl·pri@example.test   fb      5%   3d1h   ok       api\ncl·work@example.test  -       -    -      offline  -\ncx·base@example.test  7d      30%  1d2h   ok       api\ncx·alt@example.test   7d      18%  1d2h   ok       rollout\n",
+  "stderr": ""
+}
