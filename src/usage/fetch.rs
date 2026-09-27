@@ -122,11 +122,19 @@ fn epoch(value: &Value) -> Option<i64> {
     }
     None
 }
-fn pct(window: &Value) -> Option<f64> {
-    number(probe(
+fn pct(window: &Value) -> Option<Value> {
+    let value = probe(
         window,
         &["used_percentage", "utilization", "used_percent", "percent"],
-    ))
+    );
+    // A JSON number is written back as it came, so 43 stays 43 in the cache, as in Python.
+    number(value).map(|n| {
+        if value.is_number() {
+            value.clone()
+        } else {
+            json!(n)
+        }
+    })
 }
 fn reset(window: &Value) -> Option<i64> {
     epoch(probe(window, &["resets_at", "reset_at", "resets"]))
