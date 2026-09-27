@@ -25,6 +25,7 @@ import base64
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -313,8 +314,11 @@ def usage_home(tmp_path):
 
 
 def run_yelo(argv, env, cwd=None, stdin=""):
+    # YELO_CMD points every CLI-level test at another build, such as the Rust port.
+    command = shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else [
+        sys.executable, "-m", "yelo.cli"]
     return subprocess.run(
-        [sys.executable, "-m", "yelo.cli", *argv],
+        [*command, *argv],
         capture_output=True, text=True, env=env, cwd=cwd, input=stdin,
     )
 
