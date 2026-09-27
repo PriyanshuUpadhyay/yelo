@@ -74,6 +74,23 @@ pub fn write_json(path: &Path, value: &Value) {
     write(path, &(python_json(value) + "\n"));
 }
 
+pub fn set_age(path: &Path, seconds: u64) {
+    let stamp = SystemTime::now() - std::time::Duration::from_secs(seconds);
+    let file = fs::File::options().write(true).open(path).unwrap();
+    file.set_times(fs::FileTimes::new().set_accessed(stamp).set_modified(stamp))
+        .unwrap();
+}
+
+pub fn mtime_ns(path: &Path) -> u128 {
+    fs::metadata(path)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+}
+
 // Python's json.dumps spacing is part of the recorded HOME file hashes.
 pub fn python_json(value: &Value) -> String {
     let compact = serde_json::to_string(value).unwrap();
