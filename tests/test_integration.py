@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from conftest import build_usage_home
+from conftest import build_usage_home, run_yelo
 from yelo import integration
 
 
@@ -23,10 +23,17 @@ def installed(tmp_path, monkeypatch):
     build_usage_home(home, int(time.time()))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.delenv("ZDOTDIR", raising=False)
-    integration.apply(str(home))
     binaries = tmp_path / "bin"
     binaries.mkdir()
-    (binaries / "python3").symlink_to(sys._base_executable)
+    setup_env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+                 "PATH": str(binaries), "YELO_DOTFILES_ROOT": str(tmp_path / "dotfiles")}
+    result = run_yelo(["setup", "launchers"], setup_env)
+    assert result.returncode == 0, result.stderr
+    yelo_command = shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else [
+        sys.executable, "-m", "yelo.cli"]
+    wrapper = binaries / "yelo"
+    wrapper.write_text("#!/bin/sh\nexec " + " ".join(map(shlex.quote, yelo_command)) + ' "$@"\n')
+    wrapper.chmod(0o755)
     for cli in ("claude", "codex"):
         path = binaries / cli
         path.write_text('''#!/bin/sh
@@ -66,15 +73,27 @@ def test_named_selection_without_yelo(installed, cli, name, suffix):
 @pytest.mark.parametrize("cli", ["claude", "codex"])
 def test_auto_selection_uses_existing_usage_ranking(installed, cli):
     home, _, env, _ = installed
-    archive = integration.runtime_path(str(home))
-    expected = subprocess.run([str(Path(env["PATH"]) / "python3"), "-I", archive,
-                               "pick", "--cli", cli, "--json"], env=env, text=True, capture_output=True)
+    expected = subprocess.run([str(Path(env["PATH"]) / "yelo"), "profile", "pick",
+                               "--cli", cli, "--json"], env=env, text=True, capture_output=True)
     assert expected.returncode == 0, expected.stderr
     selected = json.loads(expected.stdout)
     result = run(installed, cli)
     assert result.returncode == 23, result.stderr
     assert selected["dir"] in result.stdout
     assert "expiring usage first" in result.stderr
+
+
+@pytest.mark.parametrize("cli", ["claude", "codex"])
+def test_missing_yelo_runs_plain_cli(installed, tmp_path, cli):
+    home, zsh, env, source = installed
+    vendors = tmp_path / "vendors"
+    vendors.mkdir()
+    (vendors / cli).symlink_to(Path(env["PATH"]) / cli)
+    result = subprocess.run([zsh, "-dfc", source + f"{cli} --profile missing"],
+                            env={**env, "PATH": str(vendors)}, cwd=home,
+                            text=True, capture_output=True)
+    assert result.returncode == 23, result.stderr
+    assert "arg=--profile\narg=missing" in result.stdout
 
 
 @pytest.mark.parametrize("cli", ["claude", "codex"])

@@ -14,9 +14,10 @@ def test_setup_migrates_known_shell_and_keeps_backup(bench, monkeypatch):
     path.write_text(legacy.old_shell())
     assert integration.shell_owned(str(path))
     assert bench.run("setup", "launchers").returncode == 0
-    assert path.read_text() == integration.shell_text(str(bench.home))
+    assert "command yelo profile \"$@\"" in path.read_text()
+    assert "profiles.pyz" not in path.read_text()
     assert path.with_name(path.name + ".before-profile-integration").read_text() == legacy.old_shell()
-    assert not integration.missing(str(bench.home))
+    assert bench.rows(bench.run("doctor"))["launchers"] == "ok"
     before = bench.digest()
     assert bench.run("setup", "launchers").returncode == 0
     assert bench.digest() == before

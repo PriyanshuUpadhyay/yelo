@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-mod manage;
+pub(crate) mod manage;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -356,12 +356,73 @@ fn cache_windows(
     }
     windows
 }
+fn codex_model_windows(
+    row: &Row,
+    requested: Option<&str>,
+    now: i64,
+) -> Option<Vec<(String, f64, Option<f64>)>> {
+    let model = requested
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            fs::read_to_string(Path::new(&row.dir).join("config.toml"))
+                .ok()?
+                .lines()
+                .take_while(|line| !line.trim().starts_with('['))
+                .find_map(|line| {
+                    let (key, value) = line.split_once('=')?;
+                    (key.trim() == "model")
+                        .then(|| value.trim().trim_matches(['\'', '"']).to_owned())
+                })
+        })?
+        .to_ascii_lowercase();
+    let doc = read_json(&Path::new(&row.dir).join(".usage-hud-api-cache.json"))?;
+    let limits = doc["limits_by_id"].as_object()?;
+    for entry in limits.values() {
+        let Some(name) = entry["limit_name"].as_str() else {
+            continue;
+        };
+        if name.to_ascii_lowercase().replace(' ', "-") != model {
+            continue;
+        }
+        let mut windows = Vec::new();
+        for item in ["primary", "secondary"] {
+            let value = &entry[item];
+            let Some(used) = value["used_percent"].as_f64() else {
+                continue;
+            };
+            let window = if value["window_minutes"].as_f64().is_some_and(|m| m <= 300.0) {
+                "5h"
+            } else {
+                "7d"
+            };
+            let reset = value["resets_at"].as_f64();
+            windows.push((
+                window.into(),
+                if reset.is_some_and(|t| t <= now as f64) {
+                    0.0
+                } else {
+                    used
+                },
+                reset.map(|t| {
+                    if t <= now as f64 {
+                        span(window)
+                    } else {
+                        (t - now as f64) / 3600.0
+                    }
+                }),
+            ));
+        }
+        return (!windows.is_empty()).then_some(windows);
+    }
+    None
+}
 fn add_usage(
     cli: &str,
     rows: &mut [Row],
     snapshot: Option<&[Value]>,
     include_fable: bool,
-    _model: Option<&str>,
+    model: Option<&str>,
 ) {
     let now = crate::usage::now();
     for row in rows {
@@ -417,6 +478,11 @@ fn add_usage(
                     .into_iter()
                     .filter(|(w, _, _)| w == "fb"),
             );
+        }
+        if cli == "codex"
+            && let Some(specific) = codex_model_windows(row, model, now)
+        {
+            windows = specific;
         }
         if include_fable {
             row.fable_exhausted = Some(windows.iter().any(|(w, p, _)| w == "fb" && *p >= 100.0));
@@ -960,6 +1026,8 @@ pub fn run(args: &[String]) -> i32 {
         .unwrap_or("");
     let json = args.iter().any(|a| a == "--json");
     match action {
+        "model" => command_model(args),
+        "codex-model" => command_codex_model(args),
         "list" => command_list(cli, json, args.iter().any(|a| a == "--usage")),
         "resolve" => command_resolve(cli, args.last().map(String::as_str).unwrap_or(""), json),
         "menu" => command_menu(cli),
@@ -973,6 +1041,144 @@ pub fn run(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+fn command_model(args: &[String]) -> i32 {
+    let mut options = std::collections::HashMap::new();
+    let mut index = 2;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            break;
+        }
+        let (key, inline) = arg
+            .split_once('=')
+            .map_or((arg.as_str(), None), |(k, v)| (k, Some(v)));
+        if matches!(key, "--model" | "--settings" | "--setting-sources") {
+            let value = if let Some(value) = inline {
+                value
+            } else {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    eprintln!("claude: {key} requires a value");
+                    return 2;
+                };
+                value
+            };
+            options.insert(key, value.to_owned());
+        }
+        index += 1;
+    }
+    let cwd = env::current_dir().unwrap_or_default();
+    let project = cwd
+        .ancestors()
+        .find(|p| p.join(".git").exists())
+        .unwrap_or(&cwd);
+    let config = env::var("CLAUDE_CONFIG_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".claude"));
+    let sources = options
+        .get("--setting-sources")
+        .map(String::as_str)
+        .unwrap_or("user,project,local");
+    let mut settings = serde_json::Map::new();
+    let mut environment = serde_json::Map::new();
+    for (source, path) in [
+        ("user", config.join("settings.json")),
+        ("project", project.join(".claude/settings.json")),
+        ("local", project.join(".claude/settings.local.json")),
+    ] {
+        if sources.split(',').any(|s| s == source)
+            && let Some(Value::Object(data)) = read_json(&path)
+        {
+            if let Some(Value::Object(env)) = data.get("env") {
+                environment.extend(env.clone());
+            }
+            settings.extend(data);
+        }
+    }
+    if let Some(override_value) = options.get("--settings") {
+        let data = if override_value.trim_start().starts_with('{') {
+            serde_json::from_str(override_value).ok()
+        } else {
+            read_json(Path::new(override_value))
+        };
+        let Some(Value::Object(data)) = data else {
+            eprintln!("claude: cannot read --settings for account selection");
+            return 2;
+        };
+        if let Some(Value::Object(env)) = data.get("env") {
+            environment.extend(env.clone());
+        }
+        settings.extend(data);
+    }
+    let env_value = |key: &str| {
+        env::var(key).ok().or_else(|| {
+            environment
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+    };
+    let model = options
+        .get("--model")
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .or_else(|| env_value("ANTHROPIC_MODEL"))
+        .or_else(|| {
+            settings
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .or_else(|| env_value("ANTHROPIC_DEFAULT_MODEL"))
+        .unwrap_or_else(|| "default".into());
+    let family = model.split('[').next().unwrap_or("").to_ascii_lowercase();
+    let model = if matches!(family.as_str(), "fable" | "opus" | "sonnet" | "haiku") {
+        env_value(&format!(
+            "ANTHROPIC_DEFAULT_{}_MODEL",
+            family.to_ascii_uppercase()
+        ))
+        .unwrap_or(model)
+    } else {
+        model
+    };
+    println!("{model}");
+    0
+}
+
+fn command_codex_model(args: &[String]) -> i32 {
+    let mut model = String::new();
+    let mut index = 2;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            break;
+        }
+        let (key, inline) = arg
+            .split_once('=')
+            .map_or((arg.as_str(), None), |(k, v)| (k, Some(v)));
+        if matches!(key, "-m" | "--model" | "-c" | "--config") {
+            let value = if let Some(value) = inline {
+                value
+            } else {
+                index += 1;
+                args.get(index).map(String::as_str).unwrap_or("")
+            };
+            if matches!(key, "-m" | "--model") {
+                model = value.into();
+            } else if let Some((name, raw)) = value.split_once('=')
+                && name.trim() == "model"
+            {
+                model = raw.trim().trim_matches(['\'', '"']).into();
+            }
+        }
+        index += 1;
+    }
+    println!("{model}");
+    0
 }
 
 #[cfg(test)]

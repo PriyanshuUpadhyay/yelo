@@ -165,7 +165,7 @@ def test_the_python_floor_is_declared_in_one_place_and_met():
 
 
 # Public commands in help order. Vendor launches need none of these at runtime.
-GROUPS = ("profile", "usage", "setup", "doctor", "hud", "update", "release")
+GROUPS = ("profile", "usage", "setup", "doctor", "hud")
 # What each group offers, and nothing else.
 SUBCOMMANDS = {
     "usage": ("show", "fetch", "doctor"),

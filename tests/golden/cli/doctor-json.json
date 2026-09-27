@@ -9,7 +9,7 @@
     {
       "step": "launchers",
       "state": "missing",
-      "detail": "absent: $HOME/.local/bin/claude-pri; absent: $HOME/.local/bin/claude-work; absent: $HOME/.local/bin/codex-base; absent: $HOME/.local/bin/codex-alt; stale: $HOME/.config/yelo/profiles.pyz; stale: $HOME/.config/yelo/shell.sh; stale: $HOME/.zshrc"
+      "detail": "absent: $HOME/.local/bin/claude-pri; absent: $HOME/.local/bin/claude-work; absent: $HOME/.local/bin/codex-base; absent: $HOME/.local/bin/codex-alt; stale: $HOME/.config/yelo/shell.sh; stale: $HOME/.zshrc"
     },
     {
       "step": "profiles",

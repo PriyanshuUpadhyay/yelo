@@ -26,7 +26,7 @@ fn shared_names(home: &Path) -> Vec<String> {
     names.sort();
     names
 }
-fn mirror_sync(name: &str, home: &Path) -> io::Result<Vec<PathBuf>> {
+pub(crate) fn mirror_sync(name: &str, home: &Path) -> io::Result<Vec<PathBuf>> {
     let profile = home.join(".claude/.profiles").join(name);
     if !profile.is_dir() {
         fs::create_dir_all(&profile)?;
@@ -85,7 +85,7 @@ fn shell_quote(text: &str) -> String {
         format!("'{}'", text.replace('\'', "'\"'\"'"))
     }
 }
-fn launcher(cli: &str, name: &str, directory: &Path, home: &Path) -> String {
+pub(crate) fn launcher(cli: &str, name: &str, directory: &Path, home: &Path) -> String {
     let environment = if cli == "claude" {
         vec![
             ("AGENT_PROFILE_LABEL", name.to_owned()),
@@ -118,7 +118,7 @@ fn launcher(cli: &str, name: &str, directory: &Path, home: &Path) -> String {
         "#!/bin/sh\n# written by yelo setup launchers: account {name}\nexec env {assignments} {cli} \"$@\"\n"
     )
 }
-fn owned_launcher(path: &Path) -> bool {
+pub(crate) fn owned_launcher(path: &Path) -> bool {
     if path.is_symlink() {
         return false;
     }
@@ -260,23 +260,46 @@ fn create_inner(
     ))
 }
 pub(super) fn create(cli: &str, args: &[String]) -> i32 {
+    if !matches!(cli, "claude" | "codex") {
+        eprintln!("yelo: profile create: unsupported provider: {cli}");
+        return 2;
+    }
     let usage = if cli == "claude" {
         "usage: yelo profile create --cli claude NAME [--email ADDR] [--yes]"
     } else {
         "usage: yelo profile create --cli codex NAME [--yes]"
     };
-    let name = args
-        .last()
-        .map(String::as_str)
-        .filter(|s| !s.starts_with('-'));
+    let mut name = None;
+    let mut email = None;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--cli" => index += 2,
+            "--email" => {
+                email = Some(
+                    args.get(index + 1)
+                        .filter(|s| !s.starts_with('-'))
+                        .map(String::as_str)
+                        .unwrap_or(""),
+                );
+                index += if email == Some("") { 1 } else { 2 };
+            }
+            "--yes" | "-y" => index += 1,
+            "--" => {
+                name = args.get(index + 1).map(String::as_str);
+                break;
+            }
+            arg if arg.starts_with('-') => index += 1,
+            arg => {
+                name = Some(arg);
+                index += 1;
+            }
+        }
+    }
     let Some(name) = name else {
         eprintln!("{usage}");
         return 2;
     };
-    let email = args
-        .iter()
-        .position(|s| s == "--email")
-        .map(|index| args.get(index + 1).map(String::as_str).unwrap_or(""));
     match create_inner(
         cli,
         name,
