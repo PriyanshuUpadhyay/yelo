@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+mod manage;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -448,6 +449,208 @@ fn command_pick(cli: &str, json: bool) -> i32 {
         }
     }
 }
+fn rollout_files(directory: &Path, archived: bool) -> Vec<(String, String, PathBuf)> {
+    fn collect(path: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth == 0 {
+            out.extend(dirs(path).into_iter().filter(|p| p.is_file()));
+        } else {
+            for child in dirs(path).into_iter().filter(|p| p.is_dir()) {
+                collect(&child, depth - 1, out);
+            }
+        }
+    }
+    let mut paths = Vec::new();
+    collect(&directory.join("sessions"), 3, &mut paths);
+    if archived {
+        fn archived_files(path: &Path, out: &mut Vec<PathBuf>) {
+            for child in dirs(path) {
+                if child.is_dir() {
+                    archived_files(&child, out);
+                } else if child.is_file() {
+                    out.push(child);
+                }
+            }
+        }
+        archived_files(&directory.join("archived_sessions"), &mut paths);
+    }
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?;
+            let rest = name.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
+            let (started, id) = rest.split_at_checked(19)?;
+            let id = id.strip_prefix('-')?;
+            let valid_time = started.as_bytes().iter().enumerate().all(|(i, b)| {
+                if [4, 7, 10, 13, 16].contains(&i) {
+                    *b == if i == 10 { b'T' } else { b'-' }
+                } else {
+                    b.is_ascii_digit()
+                }
+            });
+            let valid_id = id.len() == 36
+                && id.as_bytes().iter().enumerate().all(|(i, b)| {
+                    if [8, 13, 18, 23].contains(&i) {
+                        *b == b'-'
+                    } else {
+                        b.is_ascii_hexdigit()
+                    }
+                });
+            if valid_time && valid_id {
+                let started = started.to_owned();
+                let id = id.to_lowercase();
+                Some((started, id, path))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+fn session_rows(limit: usize, everywhere: bool, cwd: &Path) -> Vec<Value> {
+    let mut candidates = Vec::new();
+    for profile in rows("codex", true) {
+        for (started, id, path) in rollout_files(Path::new(&profile.dir), false) {
+            candidates.push((started, id, path, profile.clone()));
+        }
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut output = Vec::new();
+    for (started, id, path, profile) in candidates {
+        if output.len() >= limit {
+            break;
+        }
+        let meta = first_line(&path).and_then(|line| serde_json::from_str::<Value>(&line).ok());
+        let Some(meta) =
+            meta.filter(|m| m.get("type").and_then(Value::as_str) == Some("session_meta"))
+        else {
+            continue;
+        };
+        let Some(session_cwd) = meta.pointer("/payload/cwd").and_then(Value::as_str) else {
+            continue;
+        };
+        if !everywhere && fs::canonicalize(session_cwd).ok() != fs::canonicalize(cwd).ok() {
+            continue;
+        }
+        let session_id = meta
+            .pointer("/payload/id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&id);
+        output.push(
+            serde_json::json!({"profile": profile.name, "dir": profile.dir,
+            "id": session_id, "path": path, "cwd": session_cwd, "started": started}),
+        );
+    }
+    output
+}
+fn home_relative(path: &str) -> String {
+    let home = home();
+    let home = home.to_string_lossy();
+    if path == home {
+        "~".to_owned()
+    } else if path.starts_with(home.as_ref()) && path.as_bytes().get(home.len()) == Some(&b'/') {
+        format!("~{}", &path[home.len()..])
+    } else {
+        path.to_owned()
+    }
+}
+fn command_sessions(args: &[String], json: bool) -> i32 {
+    let limit = args
+        .windows(2)
+        .find(|p| p[0] == "--limit")
+        .and_then(|p| p[1].parse::<i32>().ok())
+        .unwrap_or(20);
+    if limit <= 0 {
+        eprintln!("codex: --limit must be a positive number");
+        return 2;
+    }
+    let everywhere = args.iter().any(|a| a == "--all");
+    let cwd = args
+        .windows(2)
+        .find(|p| p[0] == "--cwd")
+        .map(|p| PathBuf::from(&p[1]))
+        .unwrap_or_else(|| env::current_dir().unwrap_or_default());
+    let sessions = session_rows(limit as usize, everywhere, &cwd);
+    if json {
+        println!("{}", serde_json::to_string(&sessions).unwrap());
+        return 0;
+    }
+    if sessions.is_empty() {
+        let scope = if everywhere {
+            "any account".to_owned()
+        } else {
+            format!("any account for {}", home_relative(&cwd.to_string_lossy()))
+        };
+        eprintln!("codex: no sessions found in {scope}");
+        return 1;
+    }
+    let mut header = vec!["PROFILE", "WHEN", "ID"];
+    if everywhere {
+        header.insert(2, "CWD");
+    }
+    let body = sessions
+        .iter()
+        .map(|s| {
+            let started = s["started"].as_str().unwrap_or("");
+            let mut line = vec![
+                s["profile"].as_str().unwrap_or("-").to_owned(),
+                format!(
+                    "{} {}:{}",
+                    &started[..10],
+                    &started[11..13],
+                    &started[14..16]
+                ),
+                s["id"].as_str().unwrap_or("").to_owned(),
+            ];
+            if everywhere {
+                line.insert(2, home_relative(s["cwd"].as_str().unwrap_or("")));
+            }
+            line
+        })
+        .collect();
+    print!("{}", render(header, body));
+    0
+}
+fn command_owner(args: &[String], json: bool) -> i32 {
+    let owner = if args.iter().any(|a| a == "--last") {
+        let cwd = env::current_dir().unwrap_or_default();
+        session_rows(1, args.iter().any(|a| a == "--all"), &cwd)
+            .first()
+            .cloned()
+            .map(|s| {
+                (
+                    s["profile"].as_str().map(str::to_owned),
+                    s["dir"].as_str().unwrap_or("").to_owned(),
+                )
+            })
+    } else {
+        let query = args.last().map(String::as_str).unwrap_or("");
+        let mut found = None;
+        for profile in rows("codex", false) {
+            if rollout_files(Path::new(&profile.dir), true)
+                .iter()
+                .any(|(_, id, _)| id == &query.to_lowercase())
+            {
+                found = Some((profile.name, profile.dir));
+                break;
+            }
+        }
+        if found.is_none() {
+            eprintln!("codex: session {query} is not in any account");
+            return 1;
+        }
+        found
+    };
+    let Some((name, dir)) = owner else {
+        eprintln!("codex: no sessions found in any account");
+        return 1;
+    };
+    if json {
+        println!("{}", serde_json::json!({"name": name, "dir": dir}));
+    } else {
+        println!("{}\t{}", name.as_deref().unwrap_or(""), dir);
+    }
+    0
+}
 pub fn run(args: &[String]) -> i32 {
     if args.first().map(String::as_str) != Some("profile") {
         eprintln!(
@@ -468,6 +671,10 @@ pub fn run(args: &[String]) -> i32 {
         "resolve" => command_resolve(cli, args.last().map(String::as_str).unwrap_or(""), json),
         "menu" => command_menu(cli),
         "pick" => command_pick(cli, json),
+        "sessions" => command_sessions(args, json),
+        "owner" => command_owner(args, json),
+        "create" => manage::create(cli, args),
+        "sync" => manage::sync(),
         _ => {
             eprintln!("yelo: profile {action}: not ported yet");
             2
