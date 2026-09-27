@@ -74,39 +74,79 @@ pub fn write_json(path: &Path, value: &Value) {
     write(path, &(python_json(value) + "\n"));
 }
 
+/// An XML plist of string keys and values, the shape plistlib wrote; no plutil, so it runs on Linux.
 pub fn write_plist(path: &Path, value: &Value) {
-    use std::io::Write;
-    use std::process::Stdio;
-    mkdir(path.parent().unwrap());
-    let mut child = Command::new("/usr/bin/plutil")
-        .args(["-convert", "xml1", "-o"])
-        .arg(path)
-        .arg("-")
-        .stdin(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(serde_json::to_string(value).unwrap().as_bytes())
-        .unwrap();
-    assert!(child.wait().unwrap().success());
-    set_mode(path, 0o644);
+    let escape = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let mut body = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n",
+    );
+    for (key, item) in value.as_object().unwrap() {
+        let text = item.as_str().expect("write_plist takes string values only");
+        body += &format!(
+            "\t<key>{}</key>\n\t<string>{}</string>\n",
+            escape(key),
+            escape(text)
+        );
+    }
+    body += "</dict>\n</plist>\n";
+    write(path, &body);
 }
 
+/// Reads the XML plists yelo writes (dict, array, key, string, integer, true, false), as
+/// plistlib did; no plutil, so it runs on Linux.
 pub fn read_plist(path: &Path) -> Value {
-    let output = Command::new("/usr/bin/plutil")
-        .args(["-convert", "json", "-o", "-"])
-        .arg(path)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).unwrap()
+    fn tag<'a>(rest: &mut &'a str) -> &'a str {
+        *rest = rest.trim_start();
+        let end = rest.find('>').expect("plist tag");
+        let name = &rest[1..end];
+        *rest = &rest[end + 1..];
+        name
+    }
+    fn text(rest: &mut &str, close: &str) -> String {
+        let end = rest.find(close).expect("plist close tag");
+        let raw = &rest[..end];
+        *rest = &rest[end + close.len()..];
+        raw.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
+    }
+    fn value(rest: &mut &str) -> Value {
+        match tag(rest) {
+            "dict" => {
+                let mut map = serde_json::Map::new();
+                while tag(rest) == "key" {
+                    let key = text(rest, "</key>");
+                    map.insert(key, value(rest));
+                }
+                Value::Object(map)
+            }
+            "array" => {
+                let mut items = Vec::new();
+                while !rest.trim_start().starts_with("</array>") {
+                    items.push(value(rest));
+                }
+                tag(rest);
+                Value::Array(items)
+            }
+            "string" => Value::String(text(rest, "</string>")),
+            "string/" => Value::String(String::new()),
+            "integer" => json!(text(rest, "</integer>").parse::<i64>().unwrap()),
+            "true/" => Value::Bool(true),
+            "false/" => Value::Bool(false),
+            other => panic!("unsupported plist tag {other}"),
+        }
+    }
+    let document = fs::read_to_string(path).unwrap();
+    let start = document.find("<plist").expect("plist root");
+    let mut rest = &document[start..];
+    tag(&mut rest);
+    value(&mut rest)
 }
 
 pub fn set_age(path: &Path, seconds: u64) {
