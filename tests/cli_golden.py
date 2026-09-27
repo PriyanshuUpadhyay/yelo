@@ -151,9 +151,12 @@ def run(case):
     # A HOME path of fixed length: tables pad a path column to the real path, so a longer temp
     # root would move every column. mkdtemp always adds 8 characters.
     root = tempfile.mkdtemp(prefix="yelo-", dir="/tmp")
+    # The goldens hold file modes, so the fixture and the run use one umask on every machine.
+    umask = os.umask(0o022)
     try:
         return run_in(case, root)
     finally:
+        os.umask(umask)
         shutil.rmtree(root)
 
 
@@ -162,8 +165,17 @@ def run_in(case, root):
     home, make_env = build(kind, root)
     # `sessions` without --all lists the sessions of the working directory, so it runs in proj.
     cwd = os.path.join(home, "proj") if kind == "sessions" else home
+    # The HUD check asks launchd, so a stub answers "not loaded" on every machine.
+    stubs = os.path.join(root, "stubs")
+    os.makedirs(stubs)
+    launchctl = os.path.join(stubs, "launchctl")
+    with open(launchctl, "w") as file:
+        file.write("#!/bin/sh\nexit 113\n")
+    os.chmod(launchctl, 0o755)
+    env = environment(home, make_env)
+    env["PATH"] = f"{stubs}:{env['PATH']}"
     result = subprocess.run(command() + argv, capture_output=True, text=True, input="",
-                            env=environment(home, make_env), cwd=cwd)
+                            env=env, cwd=cwd)
     stdout = scrub(result.stdout, home)
     try:
         stdout = without_clocks(json.loads(stdout))
