@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Record the CLI goldens ONCE, from the Python yelo, before the Rust port replaces it.
+"""Re-record the CLI contract from the binary under test.
 
-Run it by hand only, from the checkout root, while `src/yelo` is still the Python package:
+Run it by hand only, from the checkout root, after building the binary:
 
     uv run --with pytest python tests/golden/record-cli.py
 

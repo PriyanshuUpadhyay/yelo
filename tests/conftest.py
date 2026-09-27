@@ -1,8 +1,7 @@
 """One fixture account layout, and one way to run yelo against it.
 
 Every test that touches the filesystem builds this layout under a temporary HOME and runs
-yelo in a subprocess: `core.HOME` is resolved once at import, the way the reference script
-resolves it, so a test cannot move HOME inside its own process. No test reads the real
+the Rust yelo binary in a subprocess. No test reads the real
 ~/.claude, ~/.codex*, ~/.prime, the real Keychain, or the real usage caches.
 
 `build_usage_home` is the W1 worked example: the layout the usage goldens were rendered
@@ -25,11 +24,11 @@ import base64
 import hashlib
 import json
 import os
+import pathlib
 import shlex
 import shutil
 import stat
 import subprocess
-import sys
 import time
 
 import pytest
@@ -314,13 +313,20 @@ def usage_home(tmp_path):
 
 
 def run_yelo(argv, env, cwd=None, stdin=""):
-    # YELO_CMD points every CLI-level test at another build, such as the Rust port.
+    # YELO_CMD can point tests at another build of the Rust binary.
     command = shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else [
-        sys.executable, "-m", "yelo.cli"]
+        str(pathlib.Path(__file__).resolve().parent.parent / "target" / "debug" / "yelo")]
     return subprocess.run(
         [*command, *argv],
         capture_output=True, text=True, env=env, cwd=cwd, input=stdin,
     )
+
+
+def repo_root():
+    """The checkout of the binary under test, including when tests run from a copy."""
+    command = shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else [
+        str(pathlib.Path(__file__).resolve().parent.parent / "target" / "debug" / "yelo")]
+    return pathlib.Path(command[0]).resolve().parents[2]
 
 
 @pytest.fixture
@@ -344,7 +350,7 @@ def yelo(fixture_home):
 # The bench PATH is the fake-binary directory and nothing else. macOS ships `swift` in
 # /usr/bin, so a PATH with the system directories on it would let a test start a real build
 # (and a machine with `herdr` installed would let one reach the live server). Tests run
-# yelo through `sys.executable`, which is absolute, so nothing here needs more; a test that
+# yelo through an absolute binary path, so nothing here needs more; a test that
 # wants `git`, `herdr`, or `swift` writes its own with `bench.fake(...)`.
 # A settings.json shaped like a live one. yelo writes none of it: the only row read out of
 # it is `agents`, which asks whether some SessionStart group runs agent-host-context.py.

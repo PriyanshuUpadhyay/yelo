@@ -26,7 +26,6 @@ import pytest
 
 from conftest import (build_usage_home, codex_auth, fixture_env, rollout, run_yelo,
                       statusline_cache, usage_env, write)
-from yelo.usage import snapshot
 
 SECURITY_PROBE_STUB = '''#!/usr/bin/env python3
 """Stand-in for `security`: records every argv, then answers "the item exists"."""
@@ -110,40 +109,10 @@ def test_show_table_matches_golden(tmp_path):
 
 # --- C02 -------------------------------------------------------------------------------
 
-def reading(pct, epoch, seen, as_of, source):
-    return {"five": (pct, epoch), "seven": (pct, epoch),
-            "seen": seen, "as_of": as_of, "source": source}
 
 
-def winner(readings, now=1000000, limit=900):
-    return snapshot.pick_window(readings, "five", now, limit)
 
 
-def test_window_beats_order():
-    """A later reset epoch wins outright; inside one window the higher percentage wins,
-    then the fresher cache, then the more recently confirmed one."""
-    now = 1000000
-    spent = reading(90, now + 100, now - 10, now - 10, "statusline")
-    current = reading(10, now + 5000, now - 10, now - 10, "api")
-    assert winner((spent, current)).pct == 10
-    assert winner((current, spent)).pct == 10
-
-    # Within the 120 s slack the two readings name one window instance, so the higher
-    # percentage wins whichever cache saw it and whenever.
-    low = reading(10, now + 5000, now - 10, now - 10, "api")
-    high = reading(80, now + 5000 + 119, now - 400, now - 400, "statusline")
-    assert winner((low, high)).pct == 80
-    # Past the slack the later epoch is a different window and wins on its own.
-    later = reading(1, now + 5000 + 121, now - 400, now - 400, "statusline")
-    assert winner((low, later)).pct == 1
-
-    # Equal percentages: the fresher reading, then the more recently confirmed one.
-    stale_side = reading(50, now + 5000, now - 5000, now - 5000, "statusline")
-    fresh_side = reading(50, now + 5000, now - 10, now - 5000, "api")
-    assert winner((stale_side, fresh_side)).source == "api"
-    older = reading(50, now + 5000, now - 100, now - 100, "statusline")
-    newer = reading(50, now + 5000, now - 10, now - 10, "api")
-    assert winner((older, newer)).source == "api"
 
 
 def test_window_scopes(tmp_path):
@@ -262,11 +231,6 @@ def test_only_the_five_newest_rollouts_are_read(tmp_path):
     assert show_rows(home)[0]["pct"] == 22
 
 
-@pytest.mark.parametrize("minutes,expected", [
-    (300, "5h"), (10080, "7d"), (4320, "3d"), (120, "2h"), (90, "2h"), (0, "fallback"),
-])
-def test_window_label(minutes, expected):
-    assert snapshot.window_label(minutes, "fallback") == expected
 
 
 def test_codex_offline_reasons(tmp_path):

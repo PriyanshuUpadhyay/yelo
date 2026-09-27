@@ -8,13 +8,11 @@ import select
 import shlex
 import shutil
 import subprocess
-import sys
 import time
 
 import pytest
 
-from conftest import build_usage_home, run_yelo
-from yelo import integration
+from conftest import build_usage_home, repo_root, run_yelo
 
 
 @pytest.fixture
@@ -30,7 +28,7 @@ def installed(tmp_path, monkeypatch):
     result = run_yelo(["setup", "launchers"], setup_env)
     assert result.returncode == 0, result.stderr
     yelo_command = shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else [
-        sys.executable, "-m", "yelo.cli"]
+        str(repo_root() / "target/debug/yelo")]
     wrapper = binaries / "yelo"
     wrapper.write_text("#!/bin/sh\nexec " + " ".join(map(shlex.quote, yelo_command)) + ' "$@"\n')
     wrapper.chmod(0o755)
@@ -203,11 +201,9 @@ def test_help_passes_through_without_account_selection(installed, cli):
 
 
 def test_current_shell_can_replace_the_obsolete_wrapper(installed):
-    from yelo import legacy
-
     home, zsh, env, source = installed
     old = home / "old.zsh"
-    old.write_text(legacy.STANDALONE_SHELL)
+    old.write_text((repo_root() / "src" / "standalone_shell.zsh").read_text())
     script = '_codex_host_guard() { return 0; }\n'
     script += "source " + shlex.quote(str(old)) + "\n" + source + source
     script += "codex --profile alt"
@@ -217,13 +213,12 @@ def test_current_shell_can_replace_the_obsolete_wrapper(installed):
 
 
 def test_foreign_integration_file_is_not_overwritten(installed):
-    from yelo import setup
-
-    home, _, _, _ = installed
+    home, _, env, _ = installed
     path = home / ".config/yelo/shell.sh"
     path.write_text("# My custom shell integration\n")
-    with pytest.raises(setup.SetupError, match="another owner"):
-        integration.apply(str(home))
+    result = run_yelo(["setup", "launchers"], env)
+    assert result.returncode == 1
+    assert "another owner" in result.stderr
     assert path.read_text() == "# My custom shell integration\n"
 
 

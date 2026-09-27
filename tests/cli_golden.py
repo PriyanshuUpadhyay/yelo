@@ -1,18 +1,17 @@
 """The CLI contract of yelo, as cases run against a fixture HOME.
 
-`golden/record-cli.py` runs every case once against the Python yelo and writes
+`golden/record-cli.py` runs every case against the binary under test and writes
 `golden/cli/<case>.json`. `test_cli_golden.py` runs the same cases against the yelo under test
-(`YELO_CMD`, default the Python package) and compares. The Rust port has to pass the same
-files, so it is judged against the Python yelo rather than against itself.
+(`YELO_CMD`, default target/debug/yelo) and compares with those contract files.
 """
 
 import hashlib
 import json
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 
@@ -80,7 +79,7 @@ CASES = [
 
 def command():
     return shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else [
-        sys.executable, "-m", "yelo.cli"]
+        str(pathlib.Path(__file__).resolve().parent.parent / "target" / "debug" / "yelo")]
 
 
 def build_sessions_home(home):

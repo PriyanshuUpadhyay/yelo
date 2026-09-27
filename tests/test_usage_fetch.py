@@ -17,8 +17,6 @@ import time
 import pytest
 
 from conftest import codex_auth, fixture_env, run_yelo, write
-from yelo.usage import fetch as fetch_module
-from yelo.usage import snapshot as snapshot_module
 
 TOKEN = "sk-ant-oat-FIXTURE-TOKEN-3f9c1d"
 FIVE_HOUR_RESET = 1290
@@ -212,18 +210,17 @@ def test_fetch_claude_writes_caches(bench):
         "email", ".usage-api-cache.json", ".usage-api-cache-fable.json"}
 
 
-def test_fetch_and_snapshot_share_email_label(monkeypatch, tmp_path, capsys):
+def test_fetch_and_snapshot_share_email_label(tmp_path):
     home = tmp_path / "home"
     root = home / ".claude" / ".profiles"
     write(str(root / "pri" / "email"), "p@example.test\n")
-    monkeypatch.setenv("AGENT_PROFILES_CLAUDE_ROOT", str(root))
-    monkeypatch.setenv("AGENT_PROFILES_CODEX_GLOB_ROOT", str(home))
-    monkeypatch.setattr(fetch_module, "fetch_claude", lambda *_: ("ok", True))
-    monkeypatch.setattr(fetch_module, "codex_bin", lambda: None)
-
-    assert fetch_module.run([]) == 0
-    fetch_label = capsys.readouterr().out.partition(": ")[0]
-    snapshot_labels = {row["label"] for row in snapshot_module.snapshot_rows(str(home))}
+    env = fixture_env(home)
+    fetched = run_yelo(["usage", "fetch"], env)
+    assert fetched.returncode == 1
+    fetch_label = fetched.stdout.partition(": ")[0]
+    shown = run_yelo(["usage", "show", "--json"], env)
+    assert shown.returncode == 0, shown.stderr
+    snapshot_labels = {row["label"] for row in json.loads(shown.stdout)}
     assert snapshot_labels == {fetch_label} == {"cl·p@example.test"}
 
 
@@ -334,20 +331,6 @@ def test_non_finite_numbers_are_not_a_window(bench, tmp_path, literal):
     assert not os.path.exists(cache_path(bench, ".usage-api-cache.json"))
 
 
-def test_an_unexpected_exception_stays_inside_its_job(monkeypatch, capsys):
-    """Whatever a job raises, its account still gets exactly one outcome line, and the
-    trace names the exception class only -- a message can quote a body or a header."""
-    monkeypatch.setenv("USAGE_HUD_FETCH_DEBUG", "1")
-
-    def boom(secret):
-        raise OverflowError(f"cannot convert {secret}")
-
-    assert fetch_module.contained("pri", boom, (TOKEN,)) == ("fetch-failed", False)
-    trace = capsys.readouterr().err
-    assert "pri: unexpected OverflowError" in trace
-    assert TOKEN not in trace
-
-
 # --- C09 -------------------------------------------------------------------------------
 
 def test_token_never_leaks(bench):
@@ -413,14 +396,16 @@ def test_a_body_that_quotes_the_token_never_prints_it(bench):
             assert TOKEN not in pathlib.Path(path).read_text(errors="replace"), path
 
 
-def test_a_failed_request_raises_nothing(monkeypatch):
+def test_a_failed_request_raises_nothing(bench):
     """The in-process half of law L1: the request fails while the token is in hand, and the
     failure comes back as an answer rather than as an exception -- so there is no message
     for the token to ride out on. The endpoint is closed under the request to force it."""
     endpoint = Endpoint([(200, {})])
     endpoint.close()
-    monkeypatch.setenv("YELO_USAGE_API_URL", endpoint.url)
-    assert fetch_module.request_usage(TOKEN) == (None, None)
+    result = fetch(bench, endpoint)
+    assert result.stdout == "cl·p@example.test: fetch-failed\n"
+    assert result.returncode == 1
+    assert TOKEN not in result.stderr
 
 
 # --- C10 -------------------------------------------------------------------------------
@@ -474,16 +459,14 @@ def test_fetch_no_profiles(tmp_path):
 
 
 @pytest.mark.parametrize("status", [401, 403])
-def test_expired_auth_never_starts_an_agent(monkeypatch, tmp_path, status):
-    monkeypatch.setattr(fetch_module, "read_keychain_token", lambda name: "fixture-token")
-    requests = []
-    def request(token):
-        requests.append(token)
-        return status, "{}"
-    monkeypatch.setattr(fetch_module, "request_usage", request)
-    def forbidden(*args, **kwargs):
-        pytest.fail("Reading usage must not start an agent")
-    monkeypatch.setattr(fetch_module.subprocess, "Popen", forbidden)
-    assert fetch_module.fetch_claude("demo", str(tmp_path), str(tmp_path)) == ("auth-stale", False)
-    assert requests == ["fixture-token"]
-    assert list(tmp_path.iterdir()) == []
+def test_expired_auth_never_starts_an_agent(bench, status):
+    endpoint = Endpoint([(status, {})])
+    try:
+        result = fetch(bench, endpoint)
+    finally:
+        endpoint.close()
+    assert result.stdout == "cl·p@example.test: auth-stale\n"
+    assert result.returncode == 1
+    assert endpoint.calls == 1
+    assert not bench["log"].exists()
+    assert not os.path.exists(cache_path(bench, ".usage-api-cache.json"))

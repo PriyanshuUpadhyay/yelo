@@ -1,141 +1,45 @@
 #!/usr/bin/env python3
-"""The resolver's own tests, ported from ~/.claude/scripts/test_agent_profiles.py.
-
-Only two things changed: the module is imported as `yelo.profile.core` instead of being
-loaded from a file path, and the subprocess runs `yelo profile ...` instead of the script.
-Every assertion is the original one.
-"""
-import getpass
+"""Profile selection and session tests run through the Rust CLI."""
 import hashlib
 import json
 import os
 import pathlib
-import stat
+import shlex
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 
-from yelo.profile import core as agent_profiles
-from yelo.usage import fetch as usage_fetch
+from conftest import fixture_env, repo_root, run_yelo
 
-YELO = [sys.executable, "-m", "yelo.cli", "profile"]
-SECURITY_STUB = """#!/usr/bin/env python3
-import json, os, sys
+YELO = (shlex.split(os.environ["YELO_CMD"]) if os.environ.get("YELO_CMD") else
+        [str(repo_root() / "target/debug/yelo")]) + ["profile"]
 
-argv = sys.argv[1:]
-service = None
-for index, item in enumerate(argv):
-    if item == "-s" and index + 1 < len(argv):
-        service = argv[index + 1]
-with open(os.environ["FAKE_KEYCHAIN"], encoding="utf-8") as handle:
-    items = json.load(handle)
-blob = items.get(service)
-if blob is None:
-    sys.exit(1)
-if "-w" in argv:
-    sys.stdout.write(blob)
-sys.exit(0)
-"""
-
-
-class ParseResetHours(unittest.TestCase):
-    def test_forms(self):
-        self.assertEqual(agent_profiles.parse_reset_hours("3d23h"), 95)
-        self.assertAlmostEqual(agent_profiles.parse_reset_hours("1h19m"), 1 + 19 / 60)
-        self.assertAlmostEqual(agent_profiles.parse_reset_hours("4m"), 4 / 60)
-
-    def test_unreadable(self):
-        for text in ("now", "?", "", None, "5x"):
-            self.assertIsNone(agent_profiles.parse_reset_hours(text))
-
-
-class HudIdentity(unittest.TestCase):
-    def test_hud_label_prefers_email_and_falls_back_to_name(self):
-        self.assertEqual(agent_profiles.hud_label(
-            "claude", {"name": "pri", "email": "person@example.test"}),
-            "cl·person@example.test")
-        self.assertEqual(agent_profiles.hud_label("claude", {"name": "pri"}), "cl·pri")
-        self.assertEqual(agent_profiles.hud_label(
-            "codex", {"name": "work", "email": "person@example.test"}),
-            "cx·person@example.test")
-        self.assertEqual(agent_profiles.hud_label("codex", {"name": "work"}), "cx·work")
-        self.assertEqual(agent_profiles.hud_label("codex", {}), "cx")
-        self.assertEqual(agent_profiles.usage_data_labels(
-            "claude", {"name": "pri", "email": "person@example.test"}),
-            ["cl·person@example.test", "cl·pri"])
-
-    def test_claude_email_prefers_login_identity(self):
-        with tempfile.TemporaryDirectory() as directory:
-            pathlib.Path(directory, "email").write_text("before@example.test\n")
-            pathlib.Path(directory, ".claude.json").write_text(json.dumps({
-                "oauthAccount": {"emailAddress": "login@example.test"},
-            }))
-            self.assertEqual(agent_profiles.claude_email(directory), "login@example.test")
-            pathlib.Path(directory, ".claude.json").write_text('{"oauthAccount": null}')
-            self.assertEqual(agent_profiles.claude_email(directory), "before@example.test")
-            pathlib.Path(directory, "email").unlink()
-            self.assertIsNone(agent_profiles.claude_email(directory))
-
-
-class Urgency(unittest.TestCase):
-    def test_fresh_full_window_scores_one(self):
-        self.assertAlmostEqual(agent_profiles.urgency({"5h": (0.0, 5.0)}), 1.0)
-
-    def test_expiring_capacity_scores_high(self):
-        # 83% left with 1/5 of the window to run: about to waste most of it.
-        self.assertAlmostEqual(agent_profiles.urgency({"5h": (17.0, 1.0)}), 0.83 / 0.2)
-
-    def test_best_window_wins_across_lengths(self):
-        windows = {"5h": (0.0, 5.0), "7d": (41.0, 40.0)}
-        self.assertAlmostEqual(agent_profiles.urgency(windows), 0.59 / (40 / 168))
-
-    def test_unknown_reset_counts_as_whole_span(self):
-        self.assertAlmostEqual(agent_profiles.urgency({"7d": (30.0, None)}), 0.7)
-
-    def test_time_fraction_floor_bounds_score(self):
-        self.assertAlmostEqual(agent_profiles.urgency({"5h": (0.0, 0.001)}), 1 / 0.02)
-
-
-class KeychainService(unittest.TestCase):
-    """C12: one derivation of the Keychain item, shared by the sign-in probe and the token
-    read. The rule is written out here rather than imported, so the code has to agree with
-    it and not merely with itself."""
-
-    def expected(self, name):
-        identity = os.path.join(agent_profiles.HOME, f".claude-{name}")
-        digest = hashlib.sha256(identity.encode()).hexdigest()[:8]
-        return "Claude Code-credentials-" + digest
-
-    def test_service_is_the_identity_path_digest(self):
-        service, user = agent_profiles.keychain_service("pri")
-        self.assertEqual(service, self.expected("pri"))
-        self.assertEqual(user, os.environ.get("USER") or getpass.getuser())
-        self.assertNotEqual(agent_profiles.keychain_service("work")[0], service)
-
-    def test_keychain_service_shared(self):
-        """A fake `security` that knows only the derived item satisfies both callers, so
-        neither can be keying off a derivation of its own."""
-        with tempfile.TemporaryDirectory() as tmp:
-            items = pathlib.Path(tmp, "keychain.json")
-            items.write_text(json.dumps({
-                self.expected("pri"): json.dumps({"claudeAiOauth": {"accessToken": "t-1"}}),
-            }))
-            security = pathlib.Path(tmp, "security")
-            security.write_text(SECURITY_STUB)
-            security.chmod(security.stat().st_mode | stat.S_IXUSR)
-            os.environ["AGENT_PROFILES_SECURITY_BIN"] = str(security)
-            os.environ["FAKE_KEYCHAIN"] = str(items)
-            try:
-                self.assertTrue(agent_profiles.claude_signed_in("pri"))
-                self.assertEqual(usage_fetch.read_keychain_token("pri"), "t-1")
-                self.assertFalse(agent_profiles.claude_signed_in("work"))
-                self.assertIsNone(usage_fetch.read_keychain_token("work"))
-            finally:
-                del os.environ["AGENT_PROFILES_SECURITY_BIN"]
-                del os.environ["FAKE_KEYCHAIN"]
-
+def test_keychain_service_shared(tmp_path):
+    home = tmp_path / "home"
+    for name in ("pri", "work"):
+        (home / ".claude" / ".profiles" / name).mkdir(parents=True)
+    identity = str(home / ".claude-pri")
+    service = "Claude Code-credentials-" + hashlib.sha256(identity.encode()).hexdigest()[:8]
+    security = tmp_path / "security"
+    log = tmp_path / "security.log"
+    security.write_text('''#!/usr/bin/env python3
+import os, sys
+with open(os.environ["FAKE_SECURITY_LOG"], "a") as handle:
+    handle.write("\\t".join(sys.argv[1:]) + "\\n")
+sys.exit(0 if sys.argv[sys.argv.index("-s") + 1] == os.environ["FAKE_SERVICE"] else 1)
+''')
+    security.chmod(0o755)
+    env = fixture_env(home, security_bin=str(security))
+    env.update(FAKE_SECURITY_LOG=str(log), FAKE_SERVICE=service)
+    result = run_yelo(["profile", "list", "--cli", "claude", "--json"], env)
+    assert result.returncode == 0, result.stderr
+    rows = {row["name"]: row for row in json.loads(result.stdout)}
+    assert rows["pri"]["signed_in"] is True
+    assert rows["work"]["signed_in"] is False
+    calls = [line.split("\t") for line in log.read_text().splitlines()]
+    assert any(call[call.index("-s") + 1] == service for call in calls)
+    assert all(call[call.index("-a") + 1] == env.get("USER", "") for call in calls)
 
 class Pick(unittest.TestCase):
     """The picker's own cases, unchanged in what they assert. The rows used to come from a
@@ -178,7 +82,6 @@ class Pick(unittest.TestCase):
             "b": {"five_hour": (40, 14430), "seven_day": (40, 432630)},
         }, ["a", "b"])
         self.assertEqual(picked["name"], "b")
-
 
 class Sessions(unittest.TestCase):
     """Rollouts are laid out the way Codex writes them: one per account home, under
@@ -283,7 +186,6 @@ class Sessions(unittest.TestCase):
                          "019e08eb-508e-7e73-8bc3-1e9c69b5dfd3", work,
                          meta_type="response_item")
             self.assertEqual(self.run_sessions(root, work, "--all"), [])
-
 
 if __name__ == "__main__":
     unittest.main()

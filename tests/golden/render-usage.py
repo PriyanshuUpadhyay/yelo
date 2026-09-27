@@ -3,8 +3,8 @@
 
 `usage-show.json` is the output of the bash+jq data feed yelo's snapshot was rewritten
 from, so the rewrite is compared against the thing it replaces rather than against itself.
-`usage-show.txt` is yelo's own table: the reference has no human mode (board A1), so that
-one is rendered from yelo and reviewed by eye. Run it by hand only:
+`usage-show.txt` is the Rust binary's table: the reference has no human mode (board A1),
+so that one is rendered from the binary under test and reviewed by eye. Run it by hand only:
 
     cd /Users/me/work/jello/wt/main
     uv run --with pytest python tests/golden/render-usage.py
@@ -27,12 +27,11 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from conftest import build_usage_home, usage_env  # noqa: E402
+from conftest import build_usage_home, run_yelo, usage_env  # noqa: E402
 
 REFERENCE = pathlib.Path("/Users/me/dotfiles/home/.local/bin/usage-hud-data")
 REFERENCE_SHA256 = "16b0ce2742c47b6be3cfdcf7c648a522432a7d5f8358a6ccc68269a52abb74a1"
 AGENT_PROFILES = "/Users/me/dotfiles/home/.claude/scripts/agent-profiles.py"
-SOURCE = HERE.parent.parent / "src"
 
 
 def reference_environment(home):
@@ -63,11 +62,7 @@ def main():
         print(f"wrote usage-show.json ({len(rows)} rows)")
 
         environment = usage_env(home)
-        environment["PYTHONPATH"] = str(SOURCE)
-        table = subprocess.run(
-            [sys.executable, "-m", "yelo.cli", "usage", "show"],
-            capture_output=True, text=True, env=environment,
-        )
+        table = run_yelo(["usage", "show"], environment)
         if table.returncode != 0:
             raise SystemExit(f"yelo usage show: exit {table.returncode}: {table.stderr}")
         HERE.joinpath("usage-show.txt").write_text(table.stdout)

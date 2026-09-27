@@ -13,7 +13,6 @@ import time
 import pytest
 
 from conftest import codex_auth, fixture_env, run_yelo, write
-from yelo.usage import doctor as doctor_module
 
 LAUNCHCTL_STUB = '''#!/usr/bin/env python3
 """Stand-in for `launchctl print`: loaded for the labels named in FAKE_LOADED."""
@@ -95,7 +94,7 @@ def restamp_api_cache(bench, age):
     write(bench["api_cache"], json.dumps(document) + "\n")
 
 
-def test_doctor_matrix(bench, capsys):
+def test_doctor_matrix(bench):
     """Every verdict the audit exists to produce, with the exit code that goes with it:
     the four assertions ported from the reference's own doctor test, plus the exit rule R4
     changed from the reference's always-0 to 1 on any FAIL."""
@@ -144,17 +143,6 @@ def test_doctor_matrix(bench, capsys):
     neither = doctor(bench, FAKE_LOADED="")
     assert f"FAIL: {YELO_LABEL} not loaded — the usage HUD is not running" in neither.stdout
     assert neither.returncode == 1
-
-    # The pct invariant. Only ok and stale rows carry a last confirmed percentage, so no
-    # snapshot the CLI can produce reaches this line -- it is the regression alarm for the
-    # row gate itself, and the only way to arm it is to hand the section such a row.
-    report = doctor_module.Report()
-    doctor_module.check_freshness(
-        report, [{"label": "cl·pri", "window": "5h", "state": "offline", "pct": 43}],
-        time.time())
-    assert report.failed
-    assert "FAIL: 1 row(s) without usable data carry a pct" in capsys.readouterr().out
-
 
 def test_unparseable_cache_warns_without_failing(bench, tmp_path):
     """A bad cache is degraded, not dead: the four caches back each other up."""

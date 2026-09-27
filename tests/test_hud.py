@@ -14,15 +14,18 @@ ownership refusal is decided by a symlink the test made rather than by this mach
 import os
 import plistlib
 import stat
+import tomllib
+from pathlib import Path
 
 import pytest
 
-import yelo as yelo_package
+from conftest import repo_root
 from test_setup import env_for, run_yelo, tree_digest  # noqa: F401 - shared helpers
 
 LABEL = "io.github.priyanshuupadhyay.yelo-hud-test"
 BUNDLE_RELATIVE = ("Applications", "UsageHUD.app")
 UID = os.getuid()
+VERSION = tomllib.loads((repo_root() / "Cargo.toml").read_text())["package"]["version"]
 
 # Each fake writes one tab-separated line per invocation, so a recorded argv survives a
 # path with a space in it and the calls stay in order.
@@ -175,7 +178,7 @@ def test_install_bundle_and_plist(hud):
         "CFBundleExecutable": "UsageHUD",
         "CFBundleIdentifier": LABEL,
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": yelo_package.__version__,
+        "CFBundleShortVersionString": VERSION,
         "LSUIElement": True,
         "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True,
@@ -347,3 +350,31 @@ def test_plist_records_explicit_launcher(hud):
     assert result.returncode == 0, result.stderr
     document = plistlib.loads(hud.plist.read_bytes())
     assert document["EnvironmentVariables"]["YELO_BIN"] == "/opt/x/bin/yelo"
+
+
+def test_assemble_builds_signed_bundle_without_launchagent(hud):
+    source = hud.package / ".build" / "release" / "UsageHUD"
+    source.parent.mkdir(parents=True)
+    source.write_text("built UsageHUD binary\n")
+
+    result = hud.run("hud", "assemble", str(hud.home), str(hud.package))
+
+    assert result.returncode == 0, result.stderr
+    assert hud.binary.read_text() == "built UsageHUD binary\n"
+    assert stat.S_IMODE(hud.binary.stat().st_mode) == 0o755
+    assert plistlib.loads(hud.info.read_bytes())["CFBundleIdentifier"] == LABEL
+    (signed,) = hud.calls(hud.codesign_log)
+    assert signed[:5] == ["--force", "--sign", "-", "--identifier", LABEL]
+    assert Path(signed[5]).parent == hud.home / "Applications"
+    assert not Path(signed[5]).exists()
+    assert hud.calls(hud.swift_log) == []
+    assert not hud.plist.exists()
+
+
+def test_assemble_missing_binary_creates_nothing(hud):
+    result = hud.run("hud", "assemble", str(hud.home), str(hud.package))
+    source = hud.package / ".build" / "release" / "UsageHUD"
+    assert result.returncode != 0
+    assert result.stderr == f"yelo: hud assemble: swift build produced no binary ({source})\n"
+    assert not (hud.home / "Applications").exists()
+    assert hud.calls(hud.codesign_log) == []

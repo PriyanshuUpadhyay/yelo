@@ -19,7 +19,6 @@ import stat
 import pytest
 
 from conftest import SEEDED_SETTINGS, tree_digest
-from yelo import doctor as yelo_doctor, hud, setup
 
 HUD_LABEL = "io.github.priyanshuupadhyay.yelo-hud"
 LEGACY_PLIST = "work.example.usage-hud.plist"
@@ -166,7 +165,8 @@ def test_doctor_json_matches_the_table(bench):
     result = bench.run("doctor", "--json")
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert [row["step"] for row in report] == [step.name for step in yelo_doctor.CHECKS]
+    assert [row["step"] for row in report] == [
+        "launchers", "profiles", "profile-mirrors", "usage", "hud"]
     assert all(row["state"] == "ok" for row in report), report
     assert bench.digest() == before
 
@@ -243,7 +243,6 @@ M4 = (
 def test_doctor_hud_matrix(bench, name, links, legacy, yelo_pair, expected, code):
     """C19 and matrix M4, row by row. The setup steps are installed first so the exit code
     reads off the two HUD rows alone."""
-    assert hud.DEFAULT_LABEL == HUD_LABEL, "the label the owner signed"
     root = hud_dotfiles(bench)
     assert bench.run("setup", YELO_DOTFILES_ROOT=str(root)).returncode == 0
     if links:

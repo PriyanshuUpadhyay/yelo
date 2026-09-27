@@ -19,7 +19,6 @@ import subprocess
 
 import pytest
 
-from yelo import setup
 from conftest import (SEEDED_SETTINGS, build_fixture_home, env_for,  # noqa: F401
                       run_yelo, tree_digest)
 
@@ -305,8 +304,7 @@ def test_setup_json_output(bench):
     result = bench.run("setup", "--json")
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    assert [row["step"] for row in report] == list(setup.STEP_NAMES) == \
-        ["launchers", "profiles", "profile-mirrors"]
+    assert [row["step"] for row in report] == ["launchers", "profiles", "profile-mirrors"]
 
 
 def test_every_account_core_reports_gets_a_launcher(bench):

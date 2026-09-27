@@ -1,5 +1,5 @@
-"""The yelo under test (`YELO_CMD`, default the Python package) answers every case in
-tests/golden/cli/ exactly as the Python yelo did when the goldens were recorded."""
+"""The yelo binary (`YELO_CMD`, default target/debug/yelo) matches the CLI contract
+in tests/golden/cli/."""
 
 import json
 import pathlib
