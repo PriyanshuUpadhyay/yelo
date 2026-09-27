@@ -9,3 +9,5 @@ repository = "https://github.com/PriyanshuUpadhyay/yelo"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# The Claude Keychain service name carries sha256 of the profile's identity path.
+sha2 = "0.10"
