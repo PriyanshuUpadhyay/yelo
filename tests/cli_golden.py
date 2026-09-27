@@ -10,14 +10,23 @@ import hashlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 from conftest import (build_census_home, build_fixture_home, build_usage_home,
                       fixture_env, usage_env)
 
 OWNED_SESSION = "019e08eb-508e-7e73-8bc3-1e9c69b5dfd3"
+# (codex home, start time, session id, cwd relative to HOME, archived)
+SESSIONS = [
+    (".codex", "2026-09-01T09-00-00", "019e0000-0000-7000-8000-000000000001", "proj", False),
+    (".codex", "2026-09-02T10-00-00", "019e0000-0000-7000-8000-000000000002", "other", False),
+    (".codex-alt", "2026-09-03T11-00-00", "019e0000-0000-7000-8000-000000000003", "proj", False),
+    (".codex-alt", "2026-08-30T08-00-00", "019e0000-0000-7000-8000-000000000004", "proj", True),
+]
 # Fields that carry the wall clock. The fixtures place every cache at a fixed offset from
 # `now`, so everything derived from those offsets stays, and only the raw stamps go.
 CLOCK_KEYS = {"asOf", "seenAt"}
@@ -55,6 +64,14 @@ CASES = [
     ("usage-sessions", "usage", ["profile", "sessions", "--cli", "codex", "--all", "--json"], False),
     ("usage-owner", "usage", ["profile", "owner", "--cli", "codex", "--json", OWNED_SESSION], False),
     ("usage-doctor", "usage", ["usage", "doctor"], False),
+    ("sessions-here", "sessions", ["profile", "sessions", "--cli", "codex", "--json"], False),
+    ("sessions-all", "sessions", ["profile", "sessions", "--cli", "codex", "--all", "--json"], False),
+    ("sessions-limit", "sessions", ["profile", "sessions", "--cli", "codex", "--all", "--limit", "1", "--json"], False),
+    ("sessions-table", "sessions", ["profile", "sessions", "--cli", "codex", "--all"], False),
+    ("owner-live", "sessions", ["profile", "owner", "--cli", "codex", "--json", SESSIONS[2][2]], False),
+    ("owner-archived", "sessions", ["profile", "owner", "--cli", "codex", "--json", SESSIONS[3][2]], False),
+    ("owner-last", "sessions", ["profile", "owner", "--cli", "codex", "--last", "--json"], False),
+    ("owner-unknown", "sessions", ["profile", "owner", "--cli", "codex", "--json", "019e0000-0000-7000-8000-00000000dead"], False),
     ("create-claude", "fixture", ["profile", "create", "--cli", "claude", "--yes", "newone"], True),
     ("create-codex", "fixture", ["profile", "create", "--cli", "codex", "--yes", "newone"], True),
     ("sync-claude", "fixture", ["profile", "sync", "--cli", "claude"], True),
@@ -66,8 +83,26 @@ def command():
         sys.executable, "-m", "yelo.cli"]
 
 
+def build_sessions_home(home):
+    """The fixture accounts plus Codex rollouts the way Codex writes them: the first line is
+    the session_meta record, the cwd of each session is under HOME, and one is archived."""
+    build_fixture_home(home)
+    for codex, started, session_id, cwd, archived in SESSIONS:
+        folder = "archived_sessions" if archived else "sessions"
+        day = os.path.join(home, codex, folder, *started[:10].split("-"))
+        os.makedirs(day, exist_ok=True)
+        os.makedirs(os.path.join(home, cwd), exist_ok=True)
+        record = {"timestamp": started, "type": "session_meta",
+                  "payload": {"id": session_id, "cwd": os.path.join(home, cwd)}}
+        with open(os.path.join(day, f"rollout-{started}-{session_id}.jsonl"), "w") as file:
+            file.write(json.dumps(record) + "\n")
+    return home
+
+
 def build(kind, root):
     home = os.path.join(root, "home")
+    if kind == "sessions":
+        return build_sessions_home(home), fixture_env
     if kind == "usage":
         return build_usage_home(home, int(time.time())), usage_env
     builder = build_census_home if kind == "census" else build_fixture_home
@@ -113,11 +148,23 @@ def listing(home):
     return lines
 
 
-def run(case, root):
+def run(case):
+    # A HOME path of fixed length: tables pad a path column to the real path, so a longer temp
+    # root would move every column. mkdtemp always adds 8 characters.
+    root = tempfile.mkdtemp(prefix="yelo-", dir="/tmp")
+    try:
+        return run_in(case, root)
+    finally:
+        shutil.rmtree(root)
+
+
+def run_in(case, root):
     name, kind, argv, writes = case
     home, make_env = build(kind, root)
+    # `sessions` without --all lists the sessions of the working directory, so it runs in proj.
+    cwd = os.path.join(home, "proj") if kind == "sessions" else home
     result = subprocess.run(command() + argv, capture_output=True, text=True, input="",
-                            env=environment(home, make_env), cwd=home)
+                            env=environment(home, make_env), cwd=cwd)
     stdout = scrub(result.stdout, home)
     try:
         stdout = without_clocks(json.loads(stdout))

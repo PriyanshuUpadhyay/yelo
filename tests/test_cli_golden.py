@@ -12,6 +12,6 @@ GOLDEN = pathlib.Path(__file__).parent / "golden" / "cli"
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case[0] for case in CASES])
-def test_matches_golden(case, tmp_path):
+def test_matches_golden(case):
     expected = json.loads((GOLDEN / f"{case[0]}.json").read_text())
-    assert run(case, str(tmp_path)) == expected
+    assert run(case) == expected

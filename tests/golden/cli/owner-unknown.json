@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "profile",
+    "owner",
+    "--cli",
+    "codex",
+    "--json",
+    "019e0000-0000-7000-8000-00000000dead"
+  ],
+  "home": "sessions",
+  "exit": 1,
+  "stdout": "",
+  "stderr": "codex: session 019e0000-0000-7000-8000-00000000dead is not in any account\n"
+}

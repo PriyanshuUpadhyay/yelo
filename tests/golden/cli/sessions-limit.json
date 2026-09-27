@@ -1,0 +1,25 @@
+{
+  "argv": [
+    "profile",
+    "sessions",
+    "--cli",
+    "codex",
+    "--all",
+    "--limit",
+    "1",
+    "--json"
+  ],
+  "home": "sessions",
+  "exit": 0,
+  "stdout": [
+    {
+      "profile": "alt",
+      "dir": "$HOME/.codex-alt",
+      "id": "019e0000-0000-7000-8000-000000000003",
+      "path": "$HOME/.codex-alt/sessions/2026/09/03/rollout-2026-09-03T11-00-00-019e0000-0000-7000-8000-000000000003.jsonl",
+      "cwd": "$HOME/proj",
+      "started": "2026-09-03T11-00-00"
+    }
+  ],
+  "stderr": ""
+}

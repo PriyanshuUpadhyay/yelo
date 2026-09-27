@@ -14,7 +14,6 @@ contract is intended, never to make a failing test pass.
 import json
 import pathlib
 import sys
-import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -28,8 +27,7 @@ def main():
     for case in CASES:
         runs = []
         for _ in range(2):
-            with tempfile.TemporaryDirectory() as root:
-                runs.append(run(case, root))
+            runs.append(run(case))
         if runs[0] != runs[1]:
             raise SystemExit(f"{case[0]}: two runs differ, so it cannot be a golden")
         (out / f"{case[0]}.json").write_text(json.dumps(runs[0], indent=2, ensure_ascii=False) + "\n")

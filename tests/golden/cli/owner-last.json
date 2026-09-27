@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "profile",
+    "owner",
+    "--cli",
+    "codex",
+    "--last",
+    "--json"
+  ],
+  "home": "sessions",
+  "exit": 0,
+  "stdout": {
+    "name": "alt",
+    "dir": "$HOME/.codex-alt"
+  },
+  "stderr": ""
+}

@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "profile",
+    "sessions",
+    "--cli",
+    "codex",
+    "--all"
+  ],
+  "home": "sessions",
+  "exit": 0,
+  "stdout": "PROFILE  WHEN              CWD      ID\nalt      2026-09-03 11:00  ~/proj   019e0000-0000-7000-8000-000000000003\nbase     2026-09-02 10:00  ~/other  019e0000-0000-7000-8000-000000000002\nbase     2026-09-01 09:00  ~/proj   019e0000-0000-7000-8000-000000000001\n",
+  "stderr": ""
+}
