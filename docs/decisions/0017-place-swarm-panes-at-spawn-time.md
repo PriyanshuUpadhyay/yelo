@@ -9,7 +9,6 @@ informed-by:
   - assets/claude/scripts/swarm-spawn-role.py
   - dotfiles home/.config/herdr/bin/swarm-split.py
   - ~/.swarm/adapters/herdr.conf
-  - session 00000000-0000-4000-8000-000000000000
 ---
 
 # 0017. Place swarm panes in the main-grid shape at spawn time

@@ -8,7 +8,6 @@ supersedes-in-part:
 informed-by:
   - assets/claude/scripts/swarm-spawn-role.py
   - src/yelo/profile_shell.zsh
-  - session 00000000-0000-4000-8000-000000000000
 ---
 
 # 0016. Swarm is the only spawn path, and a pane starts the CLI by its command word
@@ -17,7 +16,7 @@ informed-by:
 
 A council seat asked for `council.claude`, which resolves to a Fable model, and the pane booted
 on the account whose Fable window was 93% spent. The route was correct and the account was not.
-`swarm spawn` was given `/Users/me/.local/bin/claude`, an absolute path, so the pane's
+`swarm spawn` was given `~/.local/bin/claude`, an absolute path, so the pane's
 shell ran the binary and never reached the `claude` function that ADR 0015 gave the
 model-aware account pick. The pane then fell back to the bare `~/.claude` config.
 
