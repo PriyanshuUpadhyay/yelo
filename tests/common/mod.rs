@@ -74,6 +74,41 @@ pub fn write_json(path: &Path, value: &Value) {
     write(path, &(python_json(value) + "\n"));
 }
 
+pub fn write_plist(path: &Path, value: &Value) {
+    use std::io::Write;
+    use std::process::Stdio;
+    mkdir(path.parent().unwrap());
+    let mut child = Command::new("/usr/bin/plutil")
+        .args(["-convert", "xml1", "-o"])
+        .arg(path)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(value).unwrap().as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    set_mode(path, 0o644);
+}
+
+pub fn read_plist(path: &Path) -> Value {
+    let output = Command::new("/usr/bin/plutil")
+        .args(["-convert", "json", "-o", "-"])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
 pub fn set_age(path: &Path, seconds: u64) {
     let stamp = SystemTime::now() - std::time::Duration::from_secs(seconds);
     let file = fs::File::options().write(true).open(path).unwrap();
