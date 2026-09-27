@@ -210,13 +210,13 @@ on macOS.
 
 ```sh
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-cargo build && uv run --no-project --with pytest python -m pytest tests -q
 swift test --package-path apps/UsageHUD
 ```
 
-The pytest suite is black-box: it runs `target/debug/yelo`, or the command in
-`YELO_CMD`, against the goldens in `tests/golden/cli`. Tests use temporary account
-homes and test credentials. The fetch tests use a local
+The tests in `tests/*.rs` run the built binary against temporary account homes and
+test credentials, and compare its output with the goldens in `tests/golden/cli`.
+`YELO_RECORD_GOLDENS=1 cargo test --test golden` records them again; do that only
+when the output changes on purpose. The fetch tests use a local
 HTTP server. Swift tests cover usage parsing, history, layout, and the HUD's local
 read command. Source files under `docs/decisions` record earlier project decisions;
 the scope above describes the current product.
