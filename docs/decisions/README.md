@@ -8,6 +8,7 @@ commit.
 
 | #    | Title                                              | Status   | Date       | Origin          |
 |------|----------------------------------------------------|----------|------------|-----------------|
+| 0019 | Put reset credits on the account rows              | accepted | 2026-09-28 | yelo            |
 | 0018 | Rewrite yelo in Rust as one binary             | accepted | 2026-09-27 | yelo            |
 | 0017 | Place swarm panes in the main-grid shape at spawn time | accepted | 2026-09-18 | yelo            |
 | 0016 | Swarm is the only spawn path                       | accepted | 2026-09-18 | yelo            |

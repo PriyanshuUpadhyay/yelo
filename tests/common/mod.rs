@@ -313,6 +313,7 @@ pub fn api_cache(now: i64, five: i64, seven: i64, age: i64) -> Value {
 pub fn codex_cache(now: i64, percent: i64, age: i64) -> Value {
     json!({"rate_limits": {"primary": {"used_percent": percent, "window_minutes": 10080,
         "resets_at": now + CODEX_RESET}, "secondary": null},
+        "reset_credits": {"available": 2, "expires_at": [4102444800_i64, null]},
         "fetched_at": now - age, "source": "api"})
 }
 

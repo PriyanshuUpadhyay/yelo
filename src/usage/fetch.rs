@@ -405,9 +405,29 @@ fn codex(row: &Row) -> (&'static str, bool) {
                                 }
                             }
                         }
-                        result = Some(
-                            json!({"rate_limits":{"primary":primary,"secondary":secondary},"limits_by_id":named,"fetched_at":now(),"source":"api"}),
-                        );
+                        let mut doc = json!({"rate_limits":{"primary":primary,"secondary":secondary},"limits_by_id":named,"fetched_at":now(),"source":"api"});
+                        let credits = &message["result"]["rateLimitResetCredits"];
+                        if let Some(count) = super::number(&credits["availableCount"]) {
+                            let mut entry = json!({"available": (count.round() as i64).max(0)});
+                            if let Some(list) = credits["credits"].as_array() {
+                                // A null expiry is a credit that never expires; a credit with any
+                                // other status or a malformed expiry is dropped.
+                                entry["expires_at"] = list
+                                    .iter()
+                                    .filter(|credit| credit["status"] == "available")
+                                    .filter_map(|credit| {
+                                        let at = &credit["expiresAt"];
+                                        if at.is_null() {
+                                            Some(Value::Null)
+                                        } else {
+                                            super::number(at).map(|n| json!(n.round() as i64))
+                                        }
+                                    })
+                                    .collect();
+                            }
+                            doc["reset_credits"] = entry;
+                        }
+                        result = Some(doc);
                     }
                 }
                 break;

@@ -154,6 +154,46 @@ fn test_result_is_json() {
 }
 
 #[test]
+fn test_reset_credits_keep_available_expiries_and_count() {
+    let stub = TestHome::new();
+    let response = json!({"id": 2, "result": {
+    "rateLimits": {"primary": primary(), "secondary": null},
+    "rateLimitResetCredits": {"availableCount": 3, "credits": [
+        {"id": "c1", "status": "available", "expiresAt": 1759536000},
+        {"id": "c2", "status": "available", "expiresAt": null},
+        {"id": "c3", "status": "redeemed", "expiresAt": 1759190400}
+    ]}}});
+    let binary = fake_codex(&stub.root.join("codex"), &first(), &response, "");
+    let run = fetch(&binary, &[]);
+    assert_eq!(run.result.status.code(), Some(0), "{}", stderr(&run.result));
+    assert_eq!(
+        run.cache.unwrap()["reset_credits"],
+        json!({"available": 3, "expires_at": [1759536000, null]})
+    );
+}
+
+#[test]
+fn test_reset_credits_count_only_and_absent() {
+    let stub = TestHome::new();
+    let response = json!({"id": 2, "result": {
+        "rateLimits": {"primary": primary(), "secondary": null},
+        "rateLimitResetCredits": {"availableCount": 2, "credits": null}}});
+    let binary = fake_codex(&stub.root.join("codex"), &first(), &response, "");
+    assert_eq!(
+        fetch(&binary, &[]).cache.unwrap()["reset_credits"],
+        json!({"available": 2})
+    );
+    let (_stub, binary) = stub_pair();
+    assert!(
+        fetch(&binary, &[])
+            .cache
+            .unwrap()
+            .get("reset_credits")
+            .is_none()
+    );
+}
+
+#[test]
 fn test_named_limits_keep_model_limits_and_drop_the_rest() {
     let stub = TestHome::new();
     let window = json!({"usedPercent":5,"windowDurationMins":300,"resetsAt":4102444800_i64});

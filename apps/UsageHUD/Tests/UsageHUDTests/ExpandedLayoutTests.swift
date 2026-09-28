@@ -135,6 +135,46 @@ final class AccountSubtitleTests: XCTestCase {
     }
 }
 
+/// The reset line under a Codex account follows the design's copy rules.
+final class ResetCreditsTextTests: XCTestCase {
+    private func epoch(_ month: Int, _ day: Int) -> Double {
+        Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12))!
+            .timeIntervalSince1970
+    }
+
+    func testPluralListsDatesInOrderWithNoExpiryLast() {
+        XCTAssertEqual(resetCreditsText(count: 3, expiries: [epoch(10, 4), epoch(10, 23), nil]),
+                       "3 resets · expire Oct 4, Oct 23, no expiry")
+    }
+
+    func testSingularUsesExpires() {
+        XCTAssertEqual(resetCreditsText(count: 1, expiries: [epoch(10, 4)]), "1 reset · expires Oct 4")
+    }
+
+    func testCountAloneWhenTheListIsUnknownOrEmpty() {
+        XCTAssertEqual(resetCreditsText(count: 2, expiries: nil), "2 resets")
+        XCTAssertEqual(resetCreditsText(count: 2, expiries: []), "2 resets")
+    }
+
+    func testCappedListEndsWithAnEllipsis() {
+        XCTAssertEqual(resetCreditsText(count: 3, expiries: [epoch(10, 4)]), "3 resets · expire Oct 4, …")
+    }
+
+    func testZeroOrAbsentDrawsNothing() {
+        XCTAssertNil(resetCreditsText(count: 0, expiries: [epoch(10, 4)]))
+        XCTAssertNil(resetCreditsText(count: nil, expiries: nil))
+    }
+
+    func testRowDecodesTheNewKeysAndAnOldRowStaysNil() throws {
+        let json = #"[{"label":"cx","provider":"codex","window":"7d","state":"ok","resetCredits":2,"resetCreditsExpireAt":[1759536000,null]},{"label":"cl·pri","provider":"claude","state":"offline"}]"#
+        let rows = try JSONDecoder().decode([MeterRow].self, from: Data(json.utf8))
+        XCTAssertEqual(rows[0].resetCredits, 2)
+        XCTAssertEqual(rows[0].resetCreditsExpireAt, [1759536000, nil])
+        XCTAssertNil(rows[1].resetCredits)
+        XCTAssertNil(rows[1].resetCreditsExpireAt)
+    }
+}
+
 /// The header clock reports the weakest confirmation that the unified fetch can refresh.
 final class HeaderClockTests: XCTestCase {
     private let now = Date().timeIntervalSince1970
@@ -254,6 +294,22 @@ final class ExpandedLayoutTests: XCTestCase {
         }
         let measured = measureExpanded(model)
         XCTAssertLessThanOrEqual(measured, hudPanelSize.height - model.notchTopInset)
+    }
+
+    /// The reset line under a Codex account renders and keeps the panel under its ceiling.
+    @MainActor
+    func testCodexResetLineRendersWithinTheCeiling() {
+        let plain = UsageModel()
+        plain.rows = fullRows()
+        let without = measureExpanded(plain)
+        var codex = row("cx", "7d", active: nil)
+        codex.resetCredits = 3
+        codex.resetCreditsExpireAt = [Date().timeIntervalSince1970 + 6 * 86_400, nil]
+        let model = UsageModel()
+        model.rows = Array(fullRows().dropLast()) + [codex]
+        let with = measureExpanded(model)
+        XCTAssertGreaterThan(with, without)
+        XCTAssertLessThan(with, hudPanelSize.height)
     }
 
     @MainActor
