@@ -41,3 +41,18 @@ jobs:
       - run: scripts/public-safety.sh
         env:
           PRIVATE_PATTERNS: ${{ secrets.PRIVATE_PATTERNS }}
+
+  # yelo needs nothing from a dotfiles checkout: an empty HOME creates, lists and resolves a profile.
+  clean-home:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install --locked --path . --root "$RUNNER_TEMP/yelo"
+      - name: Use profiles with an empty HOME
+        run: |
+          HOME=$(mktemp -d)
+          export HOME PATH="$RUNNER_TEMP/yelo/bin:$PATH"
+          yelo profile create --cli claude work --yes
+          yelo profile list --cli claude | grep -q '^work '
+          yelo profile resolve --cli claude work
