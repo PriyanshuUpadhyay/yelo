@@ -197,11 +197,17 @@ Existing installations of those tools are independent of Yelo.
 
 ## Releases
 
-Set the version in `Cargo.toml`, commit, then push a tag `vMAJOR.MINOR.PATCH` that
-matches it. The tag runs the checks, builds a source archive and its SHA-256 file with
-`git archive`, and creates a draft GitHub release with both files attached. A tag
-that does not match `Cargo.toml` fails the release. Review the draft before
-publishing it.
+Release with one command:
+
+```sh
+gh workflow run release.yml -f bump=patch   # or minor, major
+```
+
+The workflow runs the checks on `main`, raises the version in `Cargo.toml`, commits and
+tags it, and publishes a GitHub release with a source archive and its SHA-256 file. It
+then points the Homebrew formula in `PriyanshuUpadhyay/homebrew-tap` at the new tag,
+with the `TAP_DEPLOY_KEY` secret. If `main` moves while the checks run, the push fails
+and nothing is released.
 
 The GitHub checks run the Rust and CLI tests on Linux and macOS and the Swift tests
 on macOS.
