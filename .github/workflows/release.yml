@@ -1,16 +1,28 @@
 name: Release
 
+# One command releases yelo: gh workflow run release.yml -f bump=patch
+# It runs the checks on main, commits the new version, tags it, publishes the GitHub release,
+# and points the Homebrew tap at the new tag.
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Part of the version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   checks:
     uses: ./.github/workflows/checks.yml
-  source:
+  release:
     needs: checks
     runs-on: ubuntu-latest
     permissions:
@@ -18,21 +30,47 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-      - name: Prepare source archive
+          ref: ${{ github.sha }}
+      - name: Commit and tag the new version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          BUMP: ${{ inputs.bump }}
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          if [ "$RELEASE_TAG" != "v$version" ]; then
-            echo "tag $RELEASE_TAG does not match Cargo.toml version $version" >&2
-            exit 1
-          fi
-          mkdir dist
-          git archive --format=tar.gz --prefix="yelo-$version/" --output="dist/yelo-$version.tar.gz" HEAD
-          (cd dist && sha256sum "yelo-$version.tar.gz" > "yelo-$version.sha256")
-      - name: Create draft release
+          current=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          IFS=. read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="$major.$((minor + 1)).0" ;;
+            patch) version="$major.$minor.$((patch + 1))" ;;
+          esac
+          sed -i "s/^version = \"$current\"/version = \"$version\"/" Cargo.toml
+          cargo update --workspace
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "release: yelo $version"
+          git tag -a "v$version" -m "yelo $version"
+          # Fails if main moved after the checks ran, so an unchecked commit is never released.
+          git push --atomic origin HEAD:refs/heads/main "v$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" dist/*.tar.gz dist/*.sha256 --verify-tag --draft --generate-notes
+        run: |
+          mkdir dist
+          git archive --format=tar.gz --prefix="yelo-$VERSION/" --output="dist/yelo-$VERSION.tar.gz" HEAD
+          (cd dist && sha256sum "yelo-$VERSION.tar.gz" > "yelo-$VERSION.sha256")
+          gh release create "v$VERSION" dist/* --verify-tag --generate-notes
+      - name: Point the Homebrew tap at the new tag
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          url="https://github.com/PriyanshuUpadhyay/yelo/archive/refs/tags/v$VERSION.tar.gz"
+          sha=$(curl -sSfL "$url" | sha256sum | cut -d' ' -f1)
+          install -m 600 /dev/null ~/tap_key
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/tap_key
+          export GIT_SSH_COMMAND="ssh -i ~/tap_key -o IdentitiesOnly=yes"
+          git clone -q git@github.com:PriyanshuUpadhyay/homebrew-tap.git tap
+          sed -i -e "s|^  url \".*\"|  url \"$url\"|" -e "s|^  sha256 \".*\"|  sha256 \"$sha\"|" tap/Formula/yelo.rb
+          git -C tap -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qam "yelo $VERSION"
+          git -C tap push -q origin HEAD:main
