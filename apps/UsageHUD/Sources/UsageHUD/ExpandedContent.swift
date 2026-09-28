@@ -23,6 +23,13 @@ private let weekdayTimeFormatter: DateFormatter = {
     return formatter
 }()
 
+private let monthDayFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MMM d"
+    return formatter
+}()
+
 /// Red-pressure ETAs can land past midnight (weekly window: days out), where a bare HH:mm silently
 /// reads as today — prefix the weekday whenever the ETA isn't today.
 func limitTimeLabel(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
@@ -101,6 +108,20 @@ func accountSubtitle(_ rows: [MeterRow], fetchStatus: String?, now: Date = Date(
     if fetchStatus == "auth-stale" { return ("Token expired" + (age.map { " · \($0)" } ?? ""), true) }
     let parts = [age, rows.contains { $0.active == true } ? "last used" : nil].compactMap { $0 }
     return (parts.joined(separator: " · "), false)
+}
+
+/// "3 resets · expire Oct 4, Oct 5, no expiry" under a Codex account. The CLI already dropped
+/// expired credits and sorted the list with a never-expiring credit last; a list shorter than
+/// the count (backend cap) ends in an ellipsis. Zero or absent credits draw nothing.
+func resetCreditsText(count: Int?, expiries: [Double?]?) -> String? {
+    guard let count, count > 0 else { return nil }
+    let head = "\(count) \(count == 1 ? "reset" : "resets")"
+    guard let expiries, !expiries.isEmpty else { return head }
+    var dates = expiries.map { at in
+        at.map { monthDayFormatter.string(from: Date(timeIntervalSince1970: $0)) } ?? "no expiry"
+    }
+    if dates.count < count { dates.append("…") }
+    return "\(head) · \(count == 1 ? "expires" : "expire") \(dates.joined(separator: ", "))"
 }
 
 /// Risk meta for one row: red → limit ETA, amber → projected pct, green/no-trend → nil.

@@ -26,6 +26,10 @@ struct MeterRow: Codable, Equatable {
     var canFetch: Bool? = nil
     /// The account's yelo launcher. Starting it lets the CLI renew an expired token.
     var launcher: String? = nil
+    /// Usage limit reset credits that ChatGPT granted to a Codex account, and the expiry of each
+    /// available one (nil = never expires). Absent on Claude rows and on older snapshots.
+    var resetCredits: Int? = nil
+    var resetCreditsExpireAt: [Double?]? = nil
 }
 
 extension MeterRow {
