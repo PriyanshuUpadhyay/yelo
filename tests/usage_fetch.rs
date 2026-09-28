@@ -143,6 +143,9 @@ impl Drop for Endpoint {
 }
 
 fn handle(mut stream: TcpStream, reply: &Reply, requests: &mut Vec<String>) {
+    // On macOS an accepted stream inherits the listener's non-blocking mode, so a read before the
+    // request arrives failed with WouldBlock.
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
