@@ -296,6 +296,22 @@ final class ExpandedLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(measured, hudPanelSize.height - model.notchTopInset)
     }
 
+    /// The reset line under a Codex account renders and keeps the panel under its ceiling.
+    @MainActor
+    func testCodexResetLineRendersWithinTheCeiling() {
+        let plain = UsageModel()
+        plain.rows = fullRows()
+        let without = measureExpanded(plain)
+        var codex = row("cx", "7d", active: nil)
+        codex.resetCredits = 3
+        codex.resetCreditsExpireAt = [Date().timeIntervalSince1970 + 6 * 86_400, nil]
+        let model = UsageModel()
+        model.rows = Array(fullRows().dropLast()) + [codex]
+        let with = measureExpanded(model)
+        XCTAssertGreaterThan(with, without)
+        XCTAssertLessThan(with, hudPanelSize.height)
+    }
+
     @MainActor
     private func measureExpanded(_ model: UsageModel) -> CGFloat {
         let hosting = NSHostingView(rootView: ExpandedContent(model: model, reduceMotion: true))

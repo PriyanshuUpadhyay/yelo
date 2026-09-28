@@ -389,6 +389,20 @@ private struct ProviderSection: View {
                             .padding(.horizontal, 8)
                     }
                 }
+                // Full width under the row, so five dates fit on one line. Only Codex rows carry
+                // the keys, and the CLI already sorted and filtered the list.
+                if let credits = resetCreditsText(
+                    count: account.rows.compactMap(\.resetCredits).first,
+                    expiries: account.rows.compactMap(\.resetCreditsExpireAt).first
+                ) {
+                    Text(credits)
+                        .font(.system(size: 10))
+                        .foregroundStyle(textSecondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 5)
+                        .help("Usage limit resets that ChatGPT granted to this account. Redeem one in ChatGPT settings.")
+                }
             }
         }
         .padding(.horizontal, 12)
