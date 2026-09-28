@@ -95,24 +95,12 @@ fn profiles(home: &Path, apply: bool) -> Result<(&'static str, String), (String,
     Ok(("changed", path.display().to_string()))
 }
 
-fn shared_names(home: &Path) -> Vec<String> {
-    profile::dirs(&home.join(".claude"))
-        .into_iter()
-        .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
-        .filter(|name| {
-            !matches!(name.as_str(), ".profiles" | ".claude.json" | "email")
-                && !name.starts_with(".usage-cache")
-                && !name.starts_with(".usage-api-cache")
-        })
-        .collect()
-}
-
 fn mirror_issues(name: &str, home: &Path) -> Vec<(String, PathBuf)> {
     let path = profile_path(home).join(name);
     if !path.is_dir() {
         return vec![("missing".into(), path)];
     }
-    let names = shared_names(home);
+    let names = manage::shared_names(home);
     let mut found = Vec::new();
     for item in &names {
         let entry = path.join(item);
@@ -130,11 +118,12 @@ fn mirror_issues(name: &str, home: &Path) -> Vec<(String, PathBuf)> {
         let Some(item) = entry.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        if !matches!(item, ".profiles" | ".claude.json" | "email")
-            && !item.starts_with(".usage-cache")
-            && !item.starts_with(".usage-api-cache")
-            && !names.iter().any(|name| name == item)
-        {
+        if names.iter().any(|name| name == item) {
+            continue;
+        }
+        if fs::read_link(&entry).ok() == Some(PathBuf::from("../..").join(item)) {
+            found.push(("stale".into(), entry));
+        } else if !manage::excluded(item) {
             found.push(("drift".into(), entry));
         }
     }

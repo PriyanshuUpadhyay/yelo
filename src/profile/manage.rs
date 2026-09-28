@@ -12,12 +12,22 @@ fn mode(path: &Path, value: u32) -> io::Result<()> {
 fn exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
-fn excluded(name: &str) -> bool {
-    matches!(name, ".profiles" | ".claude.json" | "email")
-        || name.starts_with(".usage-cache")
+/// Names each account keeps for itself: its config, email and usage caches, the files Claude Code
+/// rewrites in its own config dir (a rewrite replaces the link with a real file), and `*.tmp.*`
+/// leftovers of an interrupted write.
+pub(crate) fn excluded(name: &str) -> bool {
+    matches!(
+        name,
+        ".profiles"
+            | ".claude.json"
+            | "email"
+            | "mcp-needs-auth-cache.json"
+            | ".last-update-result.json"
+    ) || name.starts_with(".usage-cache")
         || name.starts_with(".usage-api-cache")
+        || name.contains(".tmp.")
 }
-fn shared_names(home: &Path) -> Vec<String> {
+pub(crate) fn shared_names(home: &Path) -> Vec<String> {
     let mut names: Vec<_> = super::dirs(&home.join(".claude"))
         .into_iter()
         .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
@@ -52,7 +62,13 @@ pub(crate) fn mirror_sync(name: &str, home: &Path) -> io::Result<Vec<PathBuf>> {
         let Some(item) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !excluded(item) && !names.iter().any(|name| name == item) {
+        if names.iter().any(|name| name == item) {
+            continue;
+        }
+        if fs::read_link(&path).ok() == Some(PathBuf::from("../..").join(item)) {
+            // Our own link to an entry that is no longer shared.
+            fs::remove_file(&path)?;
+        } else if !excluded(item) {
             drift.push(path);
         }
     }
@@ -407,6 +423,38 @@ mod tests {
             fs::read(shared.join(".profiles/broken/.claude.json")).unwrap(),
             invalid
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn sync_keeps_per_account_files_and_prunes_its_own_dead_links() {
+        let home = home("per-account");
+        let shared = home.join(".claude");
+        let profile = shared.join(".profiles/sid");
+        fs::create_dir_all(&profile).unwrap();
+        for name in [
+            "mcp-needs-auth-cache.json",
+            ".last-update-result.json",
+            ".oauth.lock.tmp.1",
+        ] {
+            fs::write(shared.join(name), "shared\n").unwrap();
+        }
+        fs::write(profile.join(".last-update-result.json"), "own\n").unwrap();
+        fs::write(profile.join(".claude.json.tmp.9.x"), "").unwrap();
+        symlink(
+            "../../mcp-needs-auth-cache.json",
+            profile.join("mcp-needs-auth-cache.json"),
+        )
+        .unwrap();
+        symlink("../../gone", profile.join("gone")).unwrap();
+        assert!(mirror_sync("sid", &home).unwrap().is_empty());
+        assert_eq!(
+            fs::read_to_string(profile.join(".last-update-result.json")).unwrap(),
+            "own\n"
+        );
+        for name in ["mcp-needs-auth-cache.json", "gone", ".oauth.lock.tmp.1"] {
+            assert!(fs::symlink_metadata(profile.join(name)).is_err(), "{name}");
+        }
         fs::remove_dir_all(home).unwrap();
     }
 

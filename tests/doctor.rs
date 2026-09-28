@@ -289,3 +289,55 @@ fn test_doctor_hud_row_never_asks_launchd() {
     let result = bench.run(&["doctor"], &[("PATH", "")]);
     assert_eq!(verdicts(&result)["hud"], "ok");
 }
+
+#[test]
+fn test_doctor_accepts_per_account_files_and_temp_leftovers() {
+    let bench = Bench::new();
+    seed_accounts(&bench);
+    let shared = home(&bench).join(".claude");
+    for name in [
+        "mcp-needs-auth-cache.json",
+        ".last-update-result.json",
+        ".oauth.lock.tmp.1",
+    ] {
+        fs::write(shared.join(name), "shared\n").unwrap();
+    }
+    assert_eq!(bench.run(&["setup"], &[]).status.code(), Some(0));
+    for name in [
+        "mcp-needs-auth-cache.json",
+        ".last-update-result.json",
+        ".claude.json.tmp.9.x",
+    ] {
+        fs::write(bench.profiles.join("pri").join(name), "own\n").unwrap();
+    }
+    let result = bench.run(&["doctor"], &[]);
+    assert_eq!(
+        verdicts(&result)["profile-mirrors"],
+        "ok",
+        "{}",
+        stdout(&result)
+    );
+}
+
+#[test]
+fn test_doctor_reports_a_dead_mirror_link_and_setup_removes_it() {
+    let bench = Bench::new();
+    seed_accounts(&bench);
+    let entry = home(&bench).join(".claude/.reply-lint-last.s1");
+    fs::write(&entry, "x\n").unwrap();
+    assert_eq!(bench.run(&["setup"], &[]).status.code(), Some(0));
+    fs::remove_file(&entry).unwrap();
+    let link = bench.profiles.join("pri/.reply-lint-last.s1");
+    let result = bench.run(&["doctor"], &[]);
+    assert!(
+        stdout(&result).contains(&format!("stale: {}", link.display())),
+        "{}",
+        stdout(&result)
+    );
+    assert_eq!(bench.run(&["setup"], &[]).status.code(), Some(0));
+    assert!(fs::symlink_metadata(&link).is_err());
+    assert_eq!(
+        verdicts(&bench.run(&["doctor"], &[]))["profile-mirrors"],
+        "ok"
+    );
+}
