@@ -1,9 +1,0 @@
-{
-  "argv": [
-    "--version"
-  ],
-  "home": "fixture",
-  "exit": 0,
-  "stdout": "yelo 0.7.0\n",
-  "stderr": ""
-}

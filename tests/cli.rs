@@ -200,7 +200,10 @@ fn test_help_needs_no_host() {
 fn test_version() {
     let result = Fixture::new().run(&["--version"]);
     assert_eq!(result.status.code(), Some(0));
-    assert_eq!(stdout(&result).trim(), "yelo 0.7.0");
+    assert_eq!(
+        stdout(&result).trim(),
+        concat!("yelo ", env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[test]

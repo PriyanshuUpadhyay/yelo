@@ -172,7 +172,6 @@ macro_rules! cases {
 }
 
 cases! {
-    test_matches_golden_version => ("version", "fixture", ["--version"], false),
     test_matches_golden_list_claude => ("list-claude", "fixture", ["profile", "list", "--cli", "claude"], false),
     test_matches_golden_list_codex => ("list-codex", "fixture", ["profile", "list", "--cli", "codex"], false),
     test_matches_golden_list_claude_json => ("list-claude-json", "fixture", ["profile", "list", "--cli", "claude", "--json"], false),
