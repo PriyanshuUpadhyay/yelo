@@ -378,6 +378,32 @@ fn codex_rows(row: &Row, can_fetch: bool, now: i64, limit: i64) -> Vec<Value> {
                 (now, limit),
             ));
         }
+        // Credits belong to the account, so both rows carry them from the api cache even when
+        // the rollout sample won the pick. A credit that expired since the fetch is dropped.
+        let credits = &document["reset_credits"];
+        if let Some(available) = int(&credits["available"]) {
+            let mut expired = 0;
+            let list = credits["expires_at"].as_array().map(|list| {
+                let mut kept = Vec::new();
+                for at in list {
+                    match int(at) {
+                        None if at.is_null() => kept.push(None),
+                        Some(epoch) if epoch > now => kept.push(Some(epoch)),
+                        Some(_) => expired += 1,
+                        None => {}
+                    }
+                }
+                // Ascending, with a credit that never expires last.
+                kept.sort_by_key(|at| at.unwrap_or(i64::MAX));
+                kept
+            });
+            for value in &mut out {
+                value["resetCredits"] = json!((available - expired).max(0));
+                if let Some(list) = &list {
+                    value["resetCreditsExpireAt"] = json!(list);
+                }
+            }
+        }
         out
     };
     launcher(&mut out, "codex", row);

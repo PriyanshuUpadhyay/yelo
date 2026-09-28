@@ -228,6 +228,37 @@ fn test_codex_rows() {
 }
 
 #[test]
+fn test_codex_reset_credits() {
+    let temp = TestHome::new();
+    let now = now();
+    let dir = codex_home(&temp.home);
+    let cache = dir.join(".usage-hud-api-cache.json");
+    let mut doc = json!({"rate_limits": {"primary": {"used_percent": 30, "window_minutes": 10080,
+        "resets_at": now + common::CODEX_RESET}, "secondary": {"used_percent": 8,
+        "window_minutes": 300, "resets_at": now + common::FIVE_HOUR_RESET}},
+        "fetched_at": now - 60, "source": "api"});
+    doc["reset_credits"] =
+        json!({"available": 4, "expires_at": [null, now + 6 * 86400, now - 5, now + 3600]});
+    write_json(&cache, &doc);
+    let rows = show_rows(&temp.home, &[]);
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        assert_eq!(row["resetCredits"], 3);
+        assert_eq!(
+            row["resetCreditsExpireAt"],
+            json!([now + 3600, now + 6 * 86400, null])
+        );
+    }
+    doc["reset_credits"] = json!({"available": 2});
+    write_json(&cache, &doc);
+    let rows = show_rows(&temp.home, &[]);
+    assert_eq!(rows[0]["resetCredits"], 2);
+    assert!(rows[0].get("resetCreditsExpireAt").is_none());
+    fs::remove_file(&cache).unwrap();
+    assert!(show_rows(&temp.home, &[])[0].get("resetCredits").is_none());
+}
+
+#[test]
 fn test_only_the_five_newest_rollouts_are_read() {
     let temp = TestHome::new();
     let now = now();
@@ -284,6 +315,8 @@ fn test_row_keys_and_table() {
         "canFetch",
         "primeSignedIn",
         "reason",
+        "resetCredits",
+        "resetCreditsExpireAt",
     ]
     .into();
     for row in &rows {
