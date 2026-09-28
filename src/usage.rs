@@ -478,6 +478,9 @@ fn show(json: bool) -> i32 {
                 row["window"].as_str().unwrap_or("-").into(),
                 row["pct"].as_i64().map_or("-".into(), |n| format!("{n}%")),
                 row["reset"].as_str().unwrap_or("-").into(),
+                row["resetCredits"]
+                    .as_i64()
+                    .map_or("-".into(), |n| n.to_string()),
                 row["state"].as_str().unwrap_or("").into(),
                 row["source"].as_str().unwrap_or("-").into(),
             ]
@@ -486,7 +489,9 @@ fn show(json: bool) -> i32 {
     print!(
         "{}",
         profile::render(
-            vec!["LABEL", "WINDOW", "PCT", "RESET", "STATE", "SOURCE"],
+            vec![
+                "LABEL", "WINDOW", "PCT", "RESET", "CREDITS", "STATE", "SOURCE",
+            ],
             body
         )
     );

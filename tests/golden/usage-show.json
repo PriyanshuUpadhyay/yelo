@@ -55,7 +55,12 @@
     "asOf": 1788354108,
     "seenAt": 1788354108,
     "source": "api",
-    "canFetch": false
+    "canFetch": false,
+    "resetCredits": 2,
+    "resetCreditsExpireAt": [
+      4102444800,
+      null
+    ]
   },
   {
     "label": "cx·alt@example.test",

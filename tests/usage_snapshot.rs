@@ -353,7 +353,9 @@ fn test_row_keys_and_table() {
     let lines: Vec<_> = table.lines().collect();
     assert_eq!(
         lines[0].split_whitespace().collect::<Vec<_>>(),
-        ["LABEL", "WINDOW", "PCT", "RESET", "STATE", "SOURCE"]
+        [
+            "LABEL", "WINDOW", "PCT", "RESET", "CREDITS", "STATE", "SOURCE"
+        ]
     );
     assert_eq!(lines.len(), rows.len() + 1);
     let bare = temp.root.join("bare/home");
