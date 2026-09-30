@@ -6,14 +6,29 @@ import SwiftUI
 func hudPanelHeight(screenHeight: CGFloat) -> CGFloat { max(400, screenHeight - 40) }
 
 /// AppKit panel frame — the max headroom the window can ever occupy; the VISIBLE expanded surface
-/// hugs its measured content height (`UsageModel.expandedContentHeight`). Width is fixed. HEIGHT is
+/// hugs its measured content height (`UsageModel.expandedContentHeight`). WIDTH is set per screen
+/// to fit the widest card (`maxPanelWidth`), so a drag resizes only the card, never the window. HEIGHT is
 /// re-derived from the PLACEMENT screen every time the panel is (re)positioned (AppDelegate's
 /// placement sites are the only writers) — a launch-time constant would bake in the wrong screen:
 /// `NSScreen.main` follows key-window focus, which an accessory app never owns, so the panel is
 /// placed on the built-in notched screen. Initial value is just a pre-first-placement default.
 var hudPanelSize = NSSize(width: 624, height: hudPanelHeight(screenHeight: NSScreen.screens.first?.visibleFrame.height ?? 800))
 let fallbackNotchSize = NSSize(width: 224, height: 38)
-let expandedSurfaceWidth: CGFloat = 584
+let minPanelWidth: CGFloat = 584
+let panelWidthKey = "panelWidthPoints"
+/// Room around the card inside the window for its shadow.
+let panelWindowMargin: CGFloat = 40
+
+/// Wider than 960 pt the meters turn into thin lines far apart.
+func maxPanelWidth(screenWidth: CGFloat) -> CGFloat {
+    max(minPanelWidth, min(960, screenWidth - 80))
+}
+
+/// Card width for this screen. nil, NaN, or out-of-range stored values clamp.
+func clampedPanelWidth(_ stored: Double?, screenWidth: CGFloat) -> CGFloat {
+    guard let stored, stored.isFinite else { return minPanelWidth }
+    return min(max(CGFloat(stored), minPanelWidth), maxPanelWidth(screenWidth: screenWidth))
+}
 let notchHoverHorizontalInset: CGFloat = 8
 let notchHoverBottomInset: CGFloat = 5
 let notchHoverTopInset: CGFloat = 1
@@ -26,13 +41,14 @@ let notchHoverTopInset: CGFloat = 1
 func contentRect(
     isCollapsed: Bool,
     expandedHeight: CGFloat,
+    expandedWidth: CGFloat,
     notchWidth: CGFloat,
     notchHeight: CGFloat
 ) -> NSRect {
     let size = isCollapsed
         ? NSSize(width: notchWidth, height: notchHeight)
         : NSSize(
-            width: expandedSurfaceWidth,
+            width: expandedWidth,
             height: notchHeight + expandedHeight
         )
     return NSRect(
@@ -292,6 +308,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// with its chosen screen before using `hudPanelSize`.
     private func updatePanelCeiling(for screen: NSScreen) {
         model.applyPanelCeiling(hudPanelHeight(screenHeight: screen.visibleFrame.height))
+        hudPanelSize.width = maxPanelWidth(screenWidth: screen.frame.width) + panelWindowMargin
+        model.applyScreenWidth(screen.frame.width)
         let menuBarHeight = screen.frame.maxY - screen.visibleFrame.maxY
         model.notchTopInset = max(screen.safeAreaInsets.top, menuBarHeight)
         if screen.safeAreaInsets.top > 0 {
@@ -316,6 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return contentRect(
             isCollapsed: isCollapsed,
             expandedHeight: model.expandedContentHeight,
+            expandedWidth: model.panelWidth,
             notchWidth: model.notchTriggerWidth,
             notchHeight: model.notchTopInset
         )

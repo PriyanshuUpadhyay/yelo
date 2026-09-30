@@ -108,7 +108,7 @@ struct ContentView: View {
             return NSSize(width: model.notchTriggerWidth, height: model.notchTopInset)
         }
         return NSSize(
-            width: expandedSurfaceWidth,
+            width: model.panelWidth,
             height: model.notchTopInset + model.expandedContentHeight
         )
     }

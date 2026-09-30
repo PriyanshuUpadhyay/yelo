@@ -19,6 +19,7 @@ final class PositionTests: XCTestCase {
         let rect = contentRect(
             isCollapsed: true,
             expandedHeight: 396,
+            expandedWidth: minPanelWidth,
             notchWidth: 126,
             notchHeight: 38
         )
@@ -34,11 +35,60 @@ final class PositionTests: XCTestCase {
         let rect = contentRect(
             isCollapsed: false,
             expandedHeight: 396,
+            expandedWidth: minPanelWidth,
             notchWidth: 126,
             notchHeight: 38
         )
 
-        XCTAssertEqual(rect, CGRect(x: (640 - expandedSurfaceWidth) / 2, y: 466, width: expandedSurfaceWidth, height: 434))
+        XCTAssertEqual(rect, CGRect(x: 28, y: 466, width: 584, height: 434))
+    }
+
+    func testExpandedContentFollowsTheCardWidth() {
+        let savedSize = hudPanelSize
+        defer { hudPanelSize = savedSize }
+        hudPanelSize = CGSize(width: 1000, height: 900)
+
+        let rect = contentRect(
+            isCollapsed: false,
+            expandedHeight: 396,
+            expandedWidth: 800,
+            notchWidth: 126,
+            notchHeight: 38
+        )
+
+        XCTAssertEqual(rect, CGRect(x: 100, y: 466, width: 800, height: 434))
+    }
+
+    func testPanelWidthClampsToTheScreen() {
+        XCTAssertEqual(clampedPanelWidth(nil, screenWidth: 1512), 584)
+        XCTAssertEqual(clampedPanelWidth(.nan, screenWidth: 1512), 584)
+        XCTAssertEqual(clampedPanelWidth(500, screenWidth: 1512), 584)
+        XCTAssertEqual(clampedPanelWidth(700, screenWidth: 1512), 700)
+        XCTAssertEqual(clampedPanelWidth(5000, screenWidth: 1512), 960)
+        XCTAssertEqual(clampedPanelWidth(900, screenWidth: 800), 720)
+        // A screen too narrow for the maximum still keeps the minimum.
+        XCTAssertEqual(clampedPanelWidth(900, screenWidth: 600), 584)
+    }
+
+    @MainActor
+    func testSavedWidthSurvivesANewModelAndASmallerScreenDoesNotOverwriteIt() {
+        let suite = "UsageHUDTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let first = UsageModel(defaults: defaults)
+        first.applyScreenWidth(1512)
+        XCTAssertEqual(first.panelWidth, 584)
+        first.resizePanel(to: 760)
+        first.savePanelWidth()
+
+        let small = UsageModel(defaults: defaults)
+        small.applyScreenWidth(800)
+        XCTAssertEqual(small.panelWidth, 720)
+
+        let wide = UsageModel(defaults: defaults)
+        wide.applyScreenWidth(1512)
+        XCTAssertEqual(wide.panelWidth, 760)
     }
 
     func testFullNotchHoverRectIncludesTopEdgeAndShoulderArea() {

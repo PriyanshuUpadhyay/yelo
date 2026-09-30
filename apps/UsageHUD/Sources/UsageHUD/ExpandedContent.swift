@@ -313,10 +313,10 @@ private struct ProviderSection: View {
     /// Index of this card's first account within the whole list, so the bar cascade runs top to
     /// bottom across cards instead of restarting per provider.
     let rowIndexOffset: Int
+    let accountWidth: CGFloat
 
     @State private var hoveredLabel: String?
 
-    private let accountWidth: CGFloat = 136
     private var accounts: [(label: String, rows: [MeterRow])] { groupedByLabel(rows) }
     private var windows: [String] {
         Set(rows.compactMap(\.window)).sorted {
@@ -491,13 +491,16 @@ struct ExpandedContent: View {
                                 fetchedAt: model.lastSnapshotAt, reduceMotion: reduceMotion,
                                 fetchStatuses: model.apiFetchResult?.statuses ?? [:],
                                 renewing: model.renewing, onRenew: model.renew,
-                                rowIndexOffset: sections[..<index].reduce(0) { $0 + groupedByLabel($1.rows).count }
+                                rowIndexOffset: sections[..<index].reduce(0) { $0 + groupedByLabel($1.rows).count },
+                                // A quarter of any extra width goes to the names; exactly 136 pt at
+                                // the default width, so the default layout does not move.
+                                accountWidth: 136 + (model.panelWidth - minPanelWidth) / 4
                             )
                         }
                     }
                 }
                 .padding(.vertical, 6)
-                .frame(width: expandedSurfaceWidth - 56)
+                .frame(width: model.panelWidth - 56)
                 .background(GeometryReader { proxy in
                     Color.clear
                         .onAppear { reportMeasuredSize(proxy.size) }
@@ -509,7 +512,7 @@ struct ExpandedContent: View {
             footer.frame(height: footerHeight)
         }
         .padding(.horizontal, 28)
-        .frame(width: expandedSurfaceWidth, height: visibleHeight, alignment: .top)
+        .frame(width: model.panelWidth, height: visibleHeight, alignment: .top)
     }
 
     private var header: some View {
@@ -591,6 +594,5 @@ struct ExpandedContent: View {
     private func reportMeasuredSize(_ size: CGSize) {
         naturalHeight = size.height
         model.expandedContentHeight = min(size.height + headerHeight + footerHeight, availableHeight)
-        model.expandedContentWidth = expandedSurfaceWidth
     }
 }

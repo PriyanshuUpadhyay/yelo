@@ -260,7 +260,7 @@ final class ExpandedLayoutTests: XCTestCase {
         model.rows = fullRows()
         let measured = measureExpanded(model)
         XCTAssertLessThanOrEqual(measured, hudPanelSize.height - model.notchTopInset)
-        XCTAssertEqual(model.expandedContentWidth, expandedSurfaceWidth)
+        XCTAssertEqual(model.panelWidth, minPanelWidth)
     }
 
     @MainActor
@@ -338,6 +338,6 @@ final class ExpandedLayoutTests: XCTestCase {
         model.rows = fullRows()
         // Clamped-at-ceiling means either overflow or no measurement — both are failures.
         XCTAssertLessThan(measureExpanded(model), hudPanelSize.height)
-        XCTAssertLessThan(model.expandedContentWidth, hudPanelSize.width)
+        XCTAssertLessThan(model.panelWidth, hudPanelSize.width)
     }
 }
