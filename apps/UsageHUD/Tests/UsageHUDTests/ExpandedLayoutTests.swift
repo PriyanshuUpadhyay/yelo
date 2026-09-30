@@ -312,6 +312,20 @@ final class ExpandedLayoutTests: XCTestCase {
         XCTAssertLessThan(with, hudPanelSize.height)
     }
 
+    /// A wider card lays out the same rows within the ceiling, and no taller than the default card.
+    @MainActor
+    func testWideCardReflowsWithinTheCeiling() {
+        let narrow = UsageModel()
+        narrow.rows = fullRows()
+        let atDefault = measureExpanded(narrow)
+        let wide = UsageModel()
+        wide.rows = fullRows()
+        wide.panelWidth = 900
+        let atWide = measureExpanded(wide)
+        XCTAssertLessThanOrEqual(atWide, atDefault)
+        XCTAssertLessThan(atWide, hudPanelSize.height)
+    }
+
     @MainActor
     private func measureExpanded(_ model: UsageModel) -> CGFloat {
         let hosting = NSHostingView(rootView: ExpandedContent(model: model, reduceMotion: true))

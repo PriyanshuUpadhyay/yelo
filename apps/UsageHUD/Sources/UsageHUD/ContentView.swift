@@ -162,8 +162,65 @@ struct ContentView: View {
             radius: isCollapsed ? 0 : 22,
             y: isCollapsed ? 0 : 10
         )
+        .overlay {
+            if !isCollapsed {
+                HStack(spacing: 0) {
+                    ResizeEdge(model: model, sign: -1)
+                    Spacer(minLength: 0)
+                    ResizeEdge(model: model, sign: 1)
+                }
+                // On the card's visible side edges: inside the top shoulders, above the bottom
+                // corners (see `backdrop`).
+                .padding(.horizontal, 22 - ResizeEdge.width / 2)
+                .padding(.top, model.notchTopInset)
+                .padding(.bottom, 28)
+            }
+        }
         .animation(geometryAnimation, value: isCollapsed)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
+    }
+}
+
+/// One side edge of the expanded card. The card stays centred under the notch, so a drag moves
+/// both edges and the width changes by twice the pointer move; the edge stays under the pointer.
+private struct ResizeEdge: View {
+    static let width: CGFloat = 14
+    @ObservedObject var model: UsageModel
+    /// -1 for the left edge, 1 for the right.
+    let sign: CGFloat
+    @State private var startWidth: CGFloat?
+    @State private var cursorPushed = false
+
+    var body: some View {
+        Color.clear
+            .frame(width: Self.width)
+            .contentShape(Rectangle())
+            .onHover { setCursor($0) }
+            .onDisappear { setCursor(false) }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        let start = startWidth ?? model.panelWidth
+                        if startWidth == nil {
+                            startWidth = start
+                            model.isResizing = true
+                        }
+                        model.resizePanel(to: start + sign * 2 * value.translation.width)
+                    }
+                    .onEnded { _ in
+                        startWidth = nil
+                        model.savePanelWidth()
+                        model.isResizing = false
+                    }
+            )
+            .help("Drag to resize")
+            .accessibilityHidden(true)
+    }
+
+    private func setCursor(_ on: Bool) {
+        guard on != cursorPushed else { return }
+        cursorPushed = on
+        if on { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
     }
 }

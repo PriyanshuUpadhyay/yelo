@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CoreGraphics
 import SwiftUI
 
@@ -135,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var wedgeGeneration = 0
     private var hoverTimer: Timer?
     private var clickThroughState: Bool?
+    private var resizeEndObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -287,6 +289,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hostingView = view
         panel.contentView = view
+
+        // A drag skips the hover rule; when it ends, the card may have a new width, so the
+        // tracking area follows it and the hover rule runs once.
+        resizeEndObserver = model.$isResizing.removeDuplicates().dropFirst().filter { !$0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.hostingView.updateTrackingAreas()
+                self?.handleMouseLocationChanged()
+            }
     }
 
     // The built-in notched display is the stable home; notchless Macs fall back to the cursor screen.
@@ -358,7 +369,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The ONE place hover state and click-through are decided, from raw screen-coordinate mouse
     /// location. The tracking area and cursor timer feed the same state transition.
     private func handleMouseLocationChanged() {
-        guard panel.isVisible else { return }
+        // A drag can leave the card at a width bound; it must not collapse or turn click-through,
+        // which would drop the rest of the drag.
+        guard panel.isVisible, !model.isResizing else { return }
         let isCollapsed = model.isCollapsed
         let mouseLocation = NSEvent.mouseLocation
         let hoverRect = isCollapsed ? collapsedHoverRectInScreen() : expandedHoverRectInScreen()
@@ -398,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingCollapse = nil
-            guard !self.model.openedFromMenu,
+            guard !self.model.openedFromMenu, !self.model.isResizing,
                   !self.expandedHoverRectInScreen().contains(NSEvent.mouseLocation) else { return }
             self.collapse()
         }
