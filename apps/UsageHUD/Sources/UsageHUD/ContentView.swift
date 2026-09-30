@@ -197,7 +197,11 @@ private struct ResizeEdge: View {
             .frame(width: Self.width)
             .contentShape(Rectangle())
             .onHover { setCursor($0) }
-            .onDisappear { setCursor(false) }
+            // Esc or a panel rebuild can remove the edge mid-drag, and then `onEnded` never runs.
+            .onDisappear {
+                setCursor(false)
+                if startWidth != nil { endDrag() }
+            }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
@@ -208,14 +212,32 @@ private struct ResizeEdge: View {
                         }
                         model.resizePanel(to: start + sign * 2 * value.translation.width)
                     }
-                    .onEnded { _ in
-                        startWidth = nil
-                        model.savePanelWidth()
-                        model.isResizing = false
-                    }
+                    .onEnded { _ in endDrag() }
             )
             .help("Drag to resize")
-            .accessibilityHidden(true)
+            // One adjustable element is enough; the left edge would repeat it.
+            .accessibilityHidden(sign < 0)
+            .accessibilityElement()
+            .accessibilityLabel("Panel width")
+            .accessibilityValue("\(Int(model.panelWidth)) points")
+            .accessibilityAdjustableAction { direction in
+                let step: CGFloat
+                switch direction {
+                case .increment: step = 40
+                case .decrement: step = -40
+                @unknown default: return
+                }
+                // A one-step drag, so the hover area follows the new width the same way.
+                model.isResizing = true
+                model.resizePanel(to: model.panelWidth + step)
+                endDrag()
+            }
+    }
+
+    private func endDrag() {
+        startWidth = nil
+        model.savePanelWidth()
+        model.isResizing = false
     }
 
     private func setCursor(_ on: Bool) {

@@ -544,6 +544,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func recreatePanel() {
         let frame = panel.frame
         panel.orderOut(nil)
+        // The old view goes away with any drag in progress; the hover rule must not stay blocked.
+        model.isResizing = false
         buildPanel()
         panel.setFrame(frame, display: false)
         panel.orderFrontRegardless()

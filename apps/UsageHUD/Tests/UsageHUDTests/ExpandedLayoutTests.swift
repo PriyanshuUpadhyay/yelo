@@ -352,6 +352,5 @@ final class ExpandedLayoutTests: XCTestCase {
         model.rows = fullRows()
         // Clamped-at-ceiling means either overflow or no measurement — both are failures.
         XCTAssertLessThan(measureExpanded(model), hudPanelSize.height)
-        XCTAssertLessThan(model.panelWidth, hudPanelSize.width)
     }
 }

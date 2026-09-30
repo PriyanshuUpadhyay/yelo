@@ -167,9 +167,13 @@ func cellDetail(row: MeterRow, pressure: RowPressure?, fetchedAt: Date?, now: Da
     switch pressure.pressure {
     case .red:
         guard let eta = pressure.eta100, let htr = pressure.hoursToReset else { return plain }
-        let runsOut = limitTimeLabel(fetchedAt.addingTimeInterval(eta * 3600), now: now)
-        return [DetailLine(text: "Runs out \(runsOut)", risk: true),
-                DetailLine(text: "\(reset) · \(gapLabel(hours: htr - eta)) later", risk: false)]
+        let runsOutAt = fetchedAt.addingTimeInterval(eta * 3600)
+        // The labels show whole minutes, so the gap is taken between those minutes and always
+        // matches the two times on screen.
+        let minute = { (date: Date) in floor(date.timeIntervalSince1970 / 60) }
+        let gapMinutes = minute(fetchedAt.addingTimeInterval(htr * 3600)) - minute(runsOutAt)
+        return [DetailLine(text: "Runs out \(limitTimeLabel(runsOutAt, now: now))", risk: true),
+                DetailLine(text: "\(reset) · \(gapLabel(hours: gapMinutes / 60)) later", risk: false)]
     case .amber:
         guard let projected = pressure.projected else { return plain }
         return plain + [DetailLine(text: "On pace for \(min(100, Int(projected.rounded())))% by then", risk: true)]
@@ -284,7 +288,10 @@ private struct MeterCell: View {
                     Text(line.text)
                         .font(.system(size: 10, weight: line.risk ? .medium : .regular))
                         .foregroundStyle(line.risk ? severity.textColor ?? textSecondary : textSecondary)
-                        .lineLimit(1)
+                        // Three window columns leave about 105 pt at the default width; wrap
+                        // rather than cut the time off.
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 Text("—").font(.system(size: 17, design: .rounded)).foregroundStyle(textSecondary)

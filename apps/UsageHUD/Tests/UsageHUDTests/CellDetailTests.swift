@@ -30,6 +30,12 @@ final class CellDetailTests: XCTestCase {
                                DetailLine(text: "Resets 12:00 · 42m later", risk: false)])
     }
 
+    func testGapMatchesTheTwoMinutesOnScreen() {
+        // eta 1.295 h is 11:17:42, shown as 11:17; the reset is 12:00, so the gap reads 43m.
+        let lines = cellDetail(row: row(), pressure: pressure(.red, eta100: 1.295), fetchedAt: now, now: now)
+        XCTAssertEqual(texts(lines), ["Runs out 11:17", "Resets 12:00 · 43m later"])
+    }
+
     func testAmberKeepsTheResetAndAddsThePlainProjection() {
         let lines = cellDetail(row: row(), pressure: pressure(.amber, projected: 91.6), fetchedAt: now, now: now)
         XCTAssertEqual(lines, [DetailLine(text: "Resets 12:00", risk: false),

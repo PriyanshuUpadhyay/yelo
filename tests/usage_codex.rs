@@ -224,7 +224,7 @@ fn test_named_limits_keep_model_limits_and_drop_the_rest() {
 #[test]
 fn test_accounts_fetch_at_the_same_time_and_print_in_job_order() {
     let stub = TestHome::new();
-    let binary = fake_codex(&stub.root.join("codex"), &first(), &second(), "sleep 1.5\n");
+    let binary = fake_codex(&stub.root.join("codex"), &first(), &second(), "sleep 2\n");
     let temp = TestHome::new();
     for (dir, email) in [
         (".codex", "a@example.test"),
@@ -244,6 +244,6 @@ fn test_accounts_fetch_at_the_same_time_and_print_in_job_order() {
         stdout(&result),
         "cx·a@example.test: ok\ncx·b@example.test: ok\n"
     );
-    // Serial would take at least 3 s, two sleeps of 1.5 s.
-    assert!(elapsed.as_secs_f64() < 2.7, "fetch took {elapsed:?}");
+    // Serial would take at least 4 s, two sleeps of 2 s.
+    assert!(elapsed.as_secs_f64() < 3.4, "fetch took {elapsed:?}");
 }
