@@ -142,11 +142,6 @@ func bindingRow(_ pressures: [RowPressure]) -> RowPressure? {
     }
 }
 
-func pressureAnnotation(burn: Double, eta100: Double, now: Date, formatter: DateFormatter) -> String {
-    let eta = now.addingTimeInterval(eta100 * 3600)
-    return "+\(Int(burn.rounded()))%/hr →100% ~\(formatter.string(from: eta))"
-}
-
 /// What the collapsed bubble tints from: with no trend yet (`burn == nil`) the pressure class is an
 /// uninformative `.green`, so fall back to the raw pct severity band; once a trend exists, the
 /// pressure class is the truth. nil binding → no tint.

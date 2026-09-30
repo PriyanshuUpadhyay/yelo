@@ -124,29 +124,58 @@ func resetCreditsText(count: Int?, expiries: [Double?]?) -> String? {
     return "\(head) · \(count == 1 ? "expires" : "expire") \(dates.joined(separator: ", "))"
 }
 
-/// Risk meta for one row: red → limit ETA, amber → projected pct, green/no-trend → nil.
-private func riskText(_ pressure: RowPressure?) -> String? {
-    guard let pressure, pressure.pressure != .green else { return nil }
-    if pressure.pressure == .red, let eta = pressure.eta100 {
-        return "limit ~\(limitTimeLabel(Date().addingTimeInterval(eta * 3600)))"
-    }
-    guard let projected = pressure.projected else { return nil }
-    return "→ \(min(100, Int(projected.rounded())))%"
-}
-
 /// "resets 14:30" — data-script resets are relative ("4h37m") and humanized from the absolute
 /// reset epoch at fetch time (parse_cache runs humanize_until when the HUD polls, not at
 /// cache-write), so the conversion anchors to the fetch that produced this row (a retained
 /// snapshot after a failed refresh must not drift the wall time forward); raw-string fallback
 /// when unanchorable.
-private func resetText(_ row: MeterRow, fetchedAt: Date?) -> String? {
+private func resetText(_ row: MeterRow, fetchedAt: Date?, now: Date) -> String? {
     guard let reset = row.reset else { return nil }
     // An expired sample has no upcoming reset. Its clock mark explains the state.
     if reset == "now" { return row.isStale ? nil : "Resets now" }
     if let hours = parseResetHours(reset), let fetchedAt {
-        return "Resets \(limitTimeLabel(fetchedAt.addingTimeInterval(hours * 3600)))"
+        return "Resets \(limitTimeLabel(fetchedAt.addingTimeInterval(hours * 3600), now: now))"
     }
     return "Resets in \(reset)"
+}
+
+/// "45m", "1h 10m", "2d 3h": how much sooner a window runs out than it resets.
+func gapLabel(hours: Double) -> String {
+    let minutes = max(0, Int((hours * 60).rounded()))
+    if minutes < 60 { return "\(minutes)m" }
+    if minutes < 24 * 60 {
+        let h = minutes / 60, m = minutes % 60
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+    }
+    let d = minutes / (24 * 60), h = minutes % (24 * 60) / 60
+    return h == 0 ? "\(d)d" : "\(d)d \(h)h"
+}
+
+struct DetailLine: Equatable {
+    let text: String
+    /// The line that carries the severity colour.
+    let risk: Bool
+}
+
+/// The lines under a meter bar. The reset time always shows; a risk adds the run-out time (red)
+/// or the projected use at reset (amber). Run-out and reset both anchor to the fetch, so their
+/// gap is exact and does not drift while the panel is open.
+func cellDetail(row: MeterRow, pressure: RowPressure?, fetchedAt: Date?, now: Date = Date()) -> [DetailLine] {
+    guard let reset = resetText(row, fetchedAt: fetchedAt, now: now) else { return [] }
+    let plain = [DetailLine(text: reset, risk: false)]
+    guard row.isLive, let pressure, let fetchedAt else { return plain }
+    switch pressure.pressure {
+    case .red:
+        guard let eta = pressure.eta100, let htr = pressure.hoursToReset else { return plain }
+        let runsOut = limitTimeLabel(fetchedAt.addingTimeInterval(eta * 3600), now: now)
+        return [DetailLine(text: "Runs out \(runsOut)", risk: true),
+                DetailLine(text: "\(reset) · \(gapLabel(hours: htr - eta)) later", risk: false)]
+    case .amber:
+        guard let projected = pressure.projected else { return plain }
+        return plain + [DetailLine(text: "On pace for \(min(100, Int(projected.rounded())))% by then", risk: true)]
+    case .green:
+        return plain
+    }
 }
 
 private func groupedByLabel(_ rows: [MeterRow]) -> [(label: String, rows: [MeterRow])] {
@@ -219,12 +248,8 @@ private struct MeterCell: View {
         PresentationSeverity(pct: row?.pct ?? 0, pressure: pressure?.pressure)
     }
 
-    private var isRisk: Bool { row?.isLive == true && riskText(pressure) != nil }
-
-    private var detail: String {
-        guard let row else { return "" }
-        if row.isLive, let risk = riskText(pressure) { return risk }
-        return resetText(row, fetchedAt: fetchedAt) ?? ""
+    private var detail: [DetailLine] {
+        row.map { cellDetail(row: $0, pressure: pressure, fetchedAt: fetchedAt) } ?? []
     }
 
     private var barColors: (start: Color, end: Color) {
@@ -256,10 +281,12 @@ private struct MeterCell: View {
                 }
                 UsageBarView(pct: pct, start: barColors.start, end: barColors.end,
                              dimmed: !row.isLive, reduceMotion: reduceMotion, rowIndex: rowIndex)
-                Text(detail)
-                    .font(.system(size: 10, weight: isRisk ? .medium : .regular))
-                    .foregroundStyle(isRisk ? severity.textColor ?? textSecondary : textSecondary)
-                    .lineLimit(1)
+                ForEach(detail, id: \.text) { line in
+                    Text(line.text)
+                        .font(.system(size: 10, weight: line.risk ? .medium : .regular))
+                        .foregroundStyle(line.risk ? severity.textColor ?? textSecondary : textSecondary)
+                        .lineLimit(1)
+                }
             } else {
                 Text("—").font(.system(size: 17, design: .rounded)).foregroundStyle(textSecondary)
                 Text("No sample").font(.system(size: 10)).foregroundStyle(textSecondary)
@@ -268,7 +295,7 @@ private struct MeterCell: View {
         .frame(maxWidth: .infinity, minHeight: 45, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.map { "\(windowLabel($0)), \($0.pct.map { "\($0) percent used" } ?? "No sample")" } ?? "No sample")
-        .accessibilityValue([detail, row.flatMap { freshnessDetail($0) } ?? ""].filter { !$0.isEmpty }.joined(separator: ". "))
+        .accessibilityValue((detail.map(\.text) + [row.flatMap { freshnessDetail($0) } ?? ""]).filter { !$0.isEmpty }.joined(separator: ". "))
         .help(row.map { freshnessDetail($0) ?? windowLabel($0) } ?? "No local sample for this window")
     }
 }

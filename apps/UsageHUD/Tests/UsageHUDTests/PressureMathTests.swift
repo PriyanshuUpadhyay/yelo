@@ -204,15 +204,6 @@ final class PressureMathTests: XCTestCase {
         XCTAssertEqual(rp[0].pressure, .green)
     }
 
-    func testAnnotationFormat() {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm"
-        fmt.timeZone = TimeZone(identifier: "UTC")
-        let now = Date(timeIntervalSince1970: 0) // 00:00 UTC
-        // burn 12/hr, eta100 = 3h → 03:00
-        XCTAssertEqual(pressureAnnotation(burn: 12.4, eta100: 3, now: now, formatter: fmt), "+12%/hr →100% ~03:00")
-    }
-
     func testLimitTimeLabelSameDayHasNoWeekday() {
         let now = Date()
         let eta = now.addingTimeInterval(60)
