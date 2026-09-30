@@ -220,3 +220,30 @@ fn test_named_limits_keep_model_limits_and_drop_the_rest() {
             "used_percent":5,"window_minutes":300,"resets_at":4102444800_i64},"secondary":null}})
     );
 }
+
+#[test]
+fn test_accounts_fetch_at_the_same_time_and_print_in_job_order() {
+    let stub = TestHome::new();
+    let binary = fake_codex(&stub.root.join("codex"), &first(), &second(), "sleep 2\n");
+    let temp = TestHome::new();
+    for (dir, email) in [
+        (".codex", "a@example.test"),
+        (".codex-work", "b@example.test"),
+    ] {
+        let dir = temp.home.join(dir);
+        mkdir(&dir.join("sessions"));
+        write_json(&dir.join("auth.json"), &codex_auth(email, "pro", email));
+    }
+    let mut env = fixture_env(&temp.home, common::FALSE_BIN);
+    env.insert("CODEX_BIN".into(), binary.display().to_string());
+    let started = std::time::Instant::now();
+    let result = run_yelo(&["usage", "fetch"], &env, None, "");
+    let elapsed = started.elapsed();
+    assert_eq!(result.status.code(), Some(0), "{}", stderr(&result));
+    assert_eq!(
+        stdout(&result),
+        "cx·a@example.test: ok\ncx·b@example.test: ok\n"
+    );
+    // Serial would take at least 4 s, two sleeps of 2 s.
+    assert!(elapsed.as_secs_f64() < 3.4, "fetch took {elapsed:?}");
+}

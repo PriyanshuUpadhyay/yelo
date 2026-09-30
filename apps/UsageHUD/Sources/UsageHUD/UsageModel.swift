@@ -83,9 +83,11 @@ final class UsageModel: ObservableObject {
     /// same ceiling so the very first expand, before any measurement has landed, behaves like the old
     /// fixed-height panel instead of guessing.
     @Published var expandedContentHeight: CGFloat = hudPanelSize.height
-    /// Same pattern as `expandedContentHeight`, for width — the widest content row instead of the
-    /// fixed panel width, so the expanded card hugs its content on both axes.
-    @Published var expandedContentWidth: CGFloat = hudPanelSize.width
+    /// Expanded card width. The person sets it by dragging a side edge; placement clamps it to the
+    /// screen (`applyScreenWidth`).
+    @Published var panelWidth: CGFloat = minPanelWidth
+    /// True while a side edge is dragged. The panel must not collapse or turn click-through then.
+    @Published var isResizing: Bool = false
     @Published var notchTopInset: CGFloat = fallbackNotchSize.height
     @Published var notchTriggerWidth: CGFloat = fallbackNotchSize.width
 
@@ -115,6 +117,25 @@ final class UsageModel: ObservableObject {
         expandedContentHeight = height
     }
 
+    private let defaults: UserDefaults
+    private var screenWidth: CGFloat = 0
+
+    /// Placement: the saved width, clamped for this screen. The saved value is not rewritten, so a
+    /// wider width returns on a wider screen.
+    func applyScreenWidth(_ width: CGFloat) {
+        screenWidth = width
+        panelWidth = clampedPanelWidth(defaults.object(forKey: panelWidthKey) as? Double, screenWidth: width)
+    }
+
+    /// A drag moves the width; only the end of the drag saves it.
+    func resizePanel(to width: CGFloat) {
+        panelWidth = clampedPanelWidth(Double(width), screenWidth: screenWidth)
+    }
+
+    func savePanelWidth() {
+        defaults.set(Double(panelWidth), forKey: panelWidthKey)
+    }
+
     private let historyStore: HistoryStore
 
     private var timer: Timer?
@@ -127,8 +148,10 @@ final class UsageModel: ObservableObject {
     private let processTimeout: TimeInterval = 8
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
-         historyStore: HistoryStore = HistoryStore()) {
+         historyStore: HistoryStore = HistoryStore(),
+         defaults: UserDefaults = .standard) {
         self.historyStore = historyStore
+        self.defaults = defaults
         snapshotCommand = snapshotArguments(environment: environment)
         fetchExecutable = yeloPath(environment: environment)
     }

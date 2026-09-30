@@ -139,7 +139,10 @@ The HUD opens at the top of the screen. Move the pointer over the notch to see y
 accounts, or choose **Show usage** from its menu-bar menu. The menu action keeps the
 panel open until you close it. Use **Refresh** or Command-R to run `yelo usage fetch`
 and display the updated usage. Escape closes the panel. Accounts are grouped by provider with shared usage-window
-columns. Long account lists scroll while Refresh and Close stay visible.
+columns. Long account lists scroll while Refresh and Close stay visible. Drag the left or
+right edge of the panel to make it wider; the HUD keeps that width after a restart. When a
+window will run out before it resets, its cell shows the run-out time and the reset time,
+for example "Runs out 15:20" and "Resets 16:30 · 1h 10m later".
 
 The HUD reads local usage files every two minutes and when you open it. These automatic
 reads do not use the network or read credentials. Clicking Refresh requests usage from
@@ -170,7 +173,8 @@ yelo usage doctor
 `usage fetch` is the online action used by the HUD's Refresh button. It can also run
 directly in a terminal. It reads Claude credentials from the Keychain and requests
 usage from Anthropic. It uses the installed Codex app-server
-usage method for Codex accounts. These actions can need network or Keychain access;
+usage method for Codex accounts. All accounts are requested at the same time, and the
+output lists them in a fixed order. These actions can need network or Keychain access;
 they run from the HUD only when you request Refresh. Expired Claude credentials
 return `auth-stale`.
 Sign in through the named launcher, then retry. Fetch does not start a Claude agent

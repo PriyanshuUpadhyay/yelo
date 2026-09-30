@@ -456,13 +456,24 @@ pub(super) fn run() -> i32 {
     if jobs.is_empty() {
         return 1;
     }
-    let mut any = false;
-    for (name, is_claude, row) in jobs {
-        let (word, ok) = if is_claude { claude(&row) } else { codex(&row) };
-        println!("{name}: {word}");
-        any |= ok;
-    }
-    if any { 0 } else { 1 }
+    // Each job writes only its own account dir, so the jobs share no state. Lines print in job
+    // order after each join, so stdout does not depend on which account answers first.
+    // ponytail: one thread per account; add a pool if account counts reach the hundreds.
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = jobs
+            .iter()
+            .map(|(_, is_claude, row)| {
+                scope.spawn(move || if *is_claude { claude(row) } else { codex(row) })
+            })
+            .collect();
+        let mut any = false;
+        for ((name, _, _), handle) in jobs.iter().zip(handles) {
+            let (word, ok) = handle.join().expect("usage fetch job panicked");
+            println!("{name}: {word}");
+            any |= ok;
+        }
+        if any { 0 } else { 1 }
+    })
 }
 
 #[cfg(test)]
