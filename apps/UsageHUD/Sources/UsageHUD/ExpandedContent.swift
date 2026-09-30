@@ -217,7 +217,6 @@ private struct UsageBarView: View {
                 Capsule().fill(Color.white.opacity(0.08))
                 Capsule()
                     .fill(LinearGradient(colors: [start, end], startPoint: .leading, endPoint: .trailing))
-                    .shadow(color: end.opacity(0.55), radius: 4)
                     .opacity(dimmed ? 0.45 : 1)
                     .frame(width: grown ? target : 0)
                     // The first fill is animated by the explicit `grown` transaction below; later
@@ -329,7 +328,6 @@ private struct ProviderSection: View {
             HStack(spacing: 18) {
                 HStack(spacing: 7) {
                     Circle().fill(providerColor(provider)).frame(width: 8, height: 8)
-                        .shadow(color: providerColor(provider).opacity(0.7), radius: 5)
                         .accessibilityHidden(true)
                     Text(provider == "codex" ? "Codex" : "Claude")
                         .font(.system(size: 13, weight: .semibold))
@@ -561,8 +559,10 @@ struct ExpandedContent: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Image(systemName: model.fetchFailed || model.apiFetchResult?.warning == true ? "exclamationmark.circle" : hasOlderSamples ? "clock" : "internaldrive")
-                .font(.system(size: 11))
+            // An icon only where it explains something: a warning, or the clock that marks old samples.
+            if let footerIcon {
+                Image(systemName: footerIcon).font(.system(size: 11))
+            }
             Text(footerMessage)
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
@@ -571,6 +571,11 @@ struct ExpandedContent: View {
         .foregroundStyle(model.fetchFailed || model.apiFetchResult?.warning == true ? warnTextColor : textSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) { hairlineColor.frame(height: 0.5).offset(y: -6) }
+    }
+
+    private var footerIcon: String? {
+        if model.fetchFailed || model.apiFetchResult?.warning == true { return "exclamationmark.circle" }
+        return hasOlderSamples ? "clock" : nil
     }
 
     private var footerMessage: String {
