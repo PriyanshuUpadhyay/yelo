@@ -172,8 +172,10 @@ func cellDetail(row: MeterRow, pressure: RowPressure?, fetchedAt: Date?, now: Da
         // matches the two times on screen.
         let minute = { (date: Date) in floor(date.timeIntervalSince1970 / 60) }
         let gapMinutes = minute(fetchedAt.addingTimeInterval(htr * 3600)) - minute(runsOutAt)
+        // Same minute on screen: a "0m later" gap says nothing.
+        let resetLine = gapMinutes < 1 ? reset : "\(reset) · \(gapLabel(hours: gapMinutes / 60)) later"
         return [DetailLine(text: "Runs out \(limitTimeLabel(runsOutAt, now: now))", risk: true),
-                DetailLine(text: "\(reset) · \(gapLabel(hours: gapMinutes / 60)) later", risk: false)]
+                DetailLine(text: resetLine, risk: false)]
     case .amber:
         guard let projected = pressure.projected else { return plain }
         return plain + [DetailLine(text: "On pace for \(min(100, Int(projected.rounded())))% by then", risk: true)]
@@ -284,7 +286,8 @@ private struct MeterCell: View {
                 }
                 UsageBarView(pct: pct, start: barColors.start, end: barColors.end,
                              dimmed: !row.isLive, reduceMotion: reduceMotion, rowIndex: rowIndex)
-                ForEach(detail, id: \.text) { line in
+                // At most one plain and one risk line per cell, so `risk` is a stable, unique id.
+                ForEach(detail, id: \.risk) { line in
                     Text(line.text)
                         .font(.system(size: 10, weight: line.risk ? .medium : .regular))
                         .foregroundStyle(line.risk ? severity.textColor ?? textSecondary : textSecondary)

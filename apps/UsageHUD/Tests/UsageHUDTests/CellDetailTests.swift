@@ -36,6 +36,15 @@ final class CellDetailTests: XCTestCase {
         XCTAssertEqual(texts(lines), ["Runs out 11:17", "Resets 12:00 · 43m later"])
     }
 
+    func testSameMinuteDropsTheGap() {
+        // 1.999 h runs out at 11:59:56, one shown minute before the 12:00 reset. A fetch 1 s
+        // later with 1.9999 h runs out at 12:00:00, the same minute as the reset.
+        let lines = cellDetail(row: row(reset: "2h"), pressure: pressure(.red, eta100: 1.999), fetchedAt: now, now: now)
+        XCTAssertEqual(texts(lines), ["Runs out 11:59", "Resets 12:00 · 1m later"])
+        let same = cellDetail(row: row(reset: "2h"), pressure: pressure(.red, eta100: 1.9999), fetchedAt: now.addingTimeInterval(1), now: now)
+        XCTAssertEqual(texts(same), ["Runs out 12:00", "Resets 12:00"])
+    }
+
     func testAmberKeepsTheResetAndAddsThePlainProjection() {
         let lines = cellDetail(row: row(), pressure: pressure(.amber, projected: 91.6), fetchedAt: now, now: now)
         XCTAssertEqual(lines, [DetailLine(text: "Resets 12:00", risk: false),

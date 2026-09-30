@@ -190,6 +190,8 @@ private struct ResizeEdge: View {
     /// -1 for the left edge, 1 for the right.
     let sign: CGFloat
     @State private var startWidth: CGFloat?
+    /// SwiftUI resets this when the system cancels the drag, which runs no `onEnded`.
+    @GestureState private var dragging = false
     @State private var cursorPushed = false
 
     var body: some View {
@@ -202,8 +204,12 @@ private struct ResizeEdge: View {
                 setCursor(false)
                 if startWidth != nil { endDrag() }
             }
+            .onChange(of: dragging) { _, active in
+                if !active, startWidth != nil { endDrag() }
+            }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .updating($dragging) { _, state, _ in state = true }
                     .onChanged { value in
                         let start = startWidth ?? model.panelWidth
                         if startWidth == nil {
@@ -212,11 +218,9 @@ private struct ResizeEdge: View {
                         }
                         model.resizePanel(to: start + sign * 2 * value.translation.width)
                     }
-                    .onEnded { _ in endDrag() }
+                    .onEnded { _ in if startWidth != nil { endDrag() } }
             )
             .help("Drag to resize")
-            // One adjustable element is enough; the left edge would repeat it.
-            .accessibilityHidden(sign < 0)
             .accessibilityElement()
             .accessibilityLabel("Panel width")
             .accessibilityValue("\(Int(model.panelWidth)) points")
@@ -232,6 +236,9 @@ private struct ResizeEdge: View {
                 model.resizePanel(to: model.panelWidth + step)
                 endDrag()
             }
+            // Last, so it hides the element built above. One adjustable element is enough; the
+            // left edge would repeat it.
+            .accessibilityHidden(sign < 0)
     }
 
     private func endDrag() {
