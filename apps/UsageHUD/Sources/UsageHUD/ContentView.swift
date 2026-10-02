@@ -164,16 +164,21 @@ struct ContentView: View {
         )
         .overlay {
             if !isCollapsed {
-                HStack(spacing: 0) {
-                    ResizeEdge(model: model, sign: -1)
-                    Spacer(minLength: 0)
-                    ResizeEdge(model: model, sign: 1)
+                ZStack(alignment: .bottom) {
+                    HStack(spacing: 0) {
+                        ResizeEdge(model: model, edge: .left)
+                        Spacer(minLength: 0)
+                        ResizeEdge(model: model, edge: .right)
+                    }
+                    // On the card's visible side edges: inside the top shoulders, above the bottom
+                    // corners (see `backdrop`).
+                    .padding(.horizontal, 22 - ResizeEdge.thickness / 2)
+                    .padding(.bottom, 28)
+                    // Between the bottom corners, inside the card so the hover rule still holds.
+                    ResizeEdge(model: model, edge: .bottom)
+                        .padding(.horizontal, 22 + 28)
                 }
-                // On the card's visible side edges: inside the top shoulders, above the bottom
-                // corners (see `backdrop`).
-                .padding(.horizontal, 22 - ResizeEdge.width / 2)
                 .padding(.top, model.notchTopInset)
-                .padding(.bottom, 28)
             }
         }
         .animation(geometryAnimation, value: isCollapsed)
@@ -182,48 +187,58 @@ struct ContentView: View {
     }
 }
 
-/// One side edge of the expanded card. The card stays centred under the notch, so a drag moves
-/// both edges and the width changes by twice the pointer move; the edge stays under the pointer.
+/// One edge of the expanded card. The card stays centred under the notch, so a side drag moves
+/// both side edges and the width changes by twice the pointer move; the edge stays under the
+/// pointer. The bottom edge sets a height limit; below the content height the list scrolls.
 private struct ResizeEdge: View {
-    static let width: CGFloat = 14
+    enum Edge { case left, right, bottom }
+
+    static let thickness: CGFloat = 14
     @ObservedObject var model: UsageModel
-    /// -1 for the left edge, 1 for the right.
-    let sign: CGFloat
-    @State private var startWidth: CGFloat?
+    let edge: Edge
+    @State private var startValue: CGFloat?
     /// SwiftUI resets this when the system cancels the drag, which runs no `onEnded`.
     @GestureState private var dragging = false
     @State private var cursorPushed = false
 
+    private var isBottom: Bool { edge == .bottom }
+    /// The card's visible height below the notch, with or without a limit.
+    private var currentValue: CGFloat { isBottom ? model.expandedContentHeight : model.panelWidth }
+
     var body: some View {
         Color.clear
-            .frame(width: Self.width)
+            .frame(width: isBottom ? nil : Self.thickness, height: isBottom ? 10 : nil)
             .contentShape(Rectangle())
             .onHover { setCursor($0) }
             // Esc or a panel rebuild can remove the edge mid-drag, and then `onEnded` never runs.
             .onDisappear {
                 setCursor(false)
-                if startWidth != nil { endDrag() }
+                if startValue != nil { endDrag() }
             }
             .onChange(of: dragging) { _, active in
-                if !active, startWidth != nil { endDrag() }
+                if !active, startValue != nil { endDrag() }
             }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .updating($dragging) { _, state, _ in state = true }
                     .onChanged { value in
-                        let start = startWidth ?? model.panelWidth
-                        if startWidth == nil {
-                            startWidth = start
+                        let start = startValue ?? currentValue
+                        if startValue == nil {
+                            startValue = start
                             model.isResizing = true
                         }
-                        model.resizePanel(to: start + sign * 2 * value.translation.width)
+                        switch edge {
+                        case .left: model.resizePanel(to: start - 2 * value.translation.width)
+                        case .right: model.resizePanel(to: start + 2 * value.translation.width)
+                        case .bottom: model.resizePanelHeight(to: start + value.translation.height)
+                        }
                     }
-                    .onEnded { _ in if startWidth != nil { endDrag() } }
+                    .onEnded { _ in if startValue != nil { endDrag() } }
             )
             .help("Drag to resize")
             .accessibilityElement()
-            .accessibilityLabel("Panel width")
-            .accessibilityValue("\(Int(model.panelWidth)) points")
+            .accessibilityLabel(isBottom ? "Panel height" : "Panel width")
+            .accessibilityValue("\(Int(currentValue)) points")
             .accessibilityAdjustableAction { direction in
                 let step: CGFloat
                 switch direction {
@@ -231,25 +246,26 @@ private struct ResizeEdge: View {
                 case .decrement: step = -40
                 @unknown default: return
                 }
-                // A one-step drag, so the hover area follows the new width the same way.
+                // A one-step drag, so the hover area follows the new size the same way.
                 model.isResizing = true
-                model.resizePanel(to: model.panelWidth + step)
+                if isBottom { model.resizePanelHeight(to: currentValue + step) }
+                else { model.resizePanel(to: currentValue + step) }
                 endDrag()
             }
-            // Last, so it hides the element built above. One adjustable element is enough; the
-            // left edge would repeat it.
-            .accessibilityHidden(sign < 0)
+            // Last, so it hides the element built above. One adjustable width element is enough;
+            // the left edge would repeat it.
+            .accessibilityHidden(edge == .left)
     }
 
     private func endDrag() {
-        startWidth = nil
-        model.savePanelWidth()
+        startValue = nil
+        if isBottom { model.savePanelHeightLimit() } else { model.savePanelWidth() }
         model.isResizing = false
     }
 
     private func setCursor(_ on: Bool) {
         guard on != cursorPushed else { return }
         cursorPushed = on
-        if on { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        if on { (isBottom ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).push() } else { NSCursor.pop() }
     }
 }

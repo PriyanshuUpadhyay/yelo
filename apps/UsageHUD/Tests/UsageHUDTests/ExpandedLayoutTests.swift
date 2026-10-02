@@ -273,14 +273,38 @@ final class ExpandedLayoutTests: XCTestCase {
         XCTAssertLessThan(measureExpanded(model), 640)
     }
 
+    /// Only a list taller than the screen scrolls.
     @MainActor
-    func testLongAccountListKeepsCompactViewport() {
+    func testLongAccountListStopsAtTheScreen() {
         let savedHeight = hudPanelSize.height
         defer { hudPanelSize.height = savedHeight }
         hudPanelSize.height = 1000
         let model = UsageModel()
         model.rows = fullRows() + (1...20).map { row("cx·account-\($0)", "7d", active: nil) }
-        XCTAssertEqual(measureExpanded(model), 640)
+        XCTAssertEqual(measureExpanded(model), 1000 - model.notchTopInset)
+    }
+
+    /// A height set with the bottom edge caps the card; the list scrolls under it.
+    @MainActor
+    func testHeightLimitCapsTheCard() {
+        let model = UsageModel()
+        model.rows = fullRows()
+        model.panelHeightLimit = 300
+        XCTAssertEqual(measureExpanded(model), 300)
+    }
+
+    /// Run-out and projection text never make a row taller than a calm one.
+    @MainActor
+    func testRiskDoesNotMakeRowsTaller() {
+        let calm = UsageModel()
+        calm.rows = fullRows()
+        let atRisk = UsageModel()
+        atRisk.rows = fullRows()
+        atRisk.rowPressures = atRisk.rows.enumerated().map { index, row in
+            RowPressure(label: row.label, window: row.window ?? "", pct: row.pct ?? 0, active: true, burn: 4,
+                        hoursToReset: 120, projected: 95, eta100: 10, pressure: index.isMultiple(of: 2) ? .red : .amber)
+        }
+        XCTAssertEqual(measureExpanded(atRisk), measureExpanded(calm))
     }
 
     /// Risk labels must fit inside the visible scrolling surface.
@@ -296,9 +320,9 @@ final class ExpandedLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(measured, hudPanelSize.height - model.notchTopInset)
     }
 
-    /// The reset line under a Codex account renders and keeps the panel under its ceiling.
+    /// Reset credits are a column, so a Codex account with credits is no taller than one without.
     @MainActor
-    func testCodexResetLineRendersWithinTheCeiling() {
+    func testCodexResetCreditsAddAColumnNotALine() {
         let plain = UsageModel()
         plain.rows = fullRows()
         let without = measureExpanded(plain)
@@ -307,9 +331,7 @@ final class ExpandedLayoutTests: XCTestCase {
         codex.resetCreditsExpireAt = [Date().timeIntervalSince1970 + 6 * 86_400, nil]
         let model = UsageModel()
         model.rows = Array(fullRows().dropLast()) + [codex]
-        let with = measureExpanded(model)
-        XCTAssertGreaterThan(with, without)
-        XCTAssertLessThan(with, hudPanelSize.height)
+        XCTAssertEqual(measureExpanded(model), without)
     }
 
     /// A wider card lays out the same rows within the ceiling, and no taller than the default card.
