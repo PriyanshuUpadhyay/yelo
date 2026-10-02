@@ -86,7 +86,9 @@ final class UsageModel: ObservableObject {
     /// Expanded card width. The person sets it by dragging a side edge; placement clamps it to the
     /// screen (`applyScreenWidth`).
     @Published var panelWidth: CGFloat = minPanelWidth
-    /// True while a side edge is dragged. The panel must not collapse or turn click-through then.
+    /// The most height the card may take, set by dragging its bottom edge. nil = fit every account.
+    @Published var panelHeightLimit: CGFloat?
+    /// True while an edge is dragged. The panel must not collapse or turn click-through then.
     @Published var isResizing: Bool = false
     @Published var notchTopInset: CGFloat = fallbackNotchSize.height
     @Published var notchTriggerWidth: CGFloat = fallbackNotchSize.width
@@ -136,6 +138,15 @@ final class UsageModel: ObservableObject {
         defaults.set(Double(panelWidth), forKey: panelWidthKey)
     }
 
+    /// The screen ceiling still applies on top of this limit (`ExpandedContent.availableHeight`).
+    func resizePanelHeight(to height: CGFloat) {
+        panelHeightLimit = max(minPanelHeightLimit, height)
+    }
+
+    func savePanelHeightLimit() {
+        defaults.set(panelHeightLimit.map(Double.init), forKey: panelHeightLimitKey)
+    }
+
     private let historyStore: HistoryStore
 
     private var timer: Timer?
@@ -152,6 +163,8 @@ final class UsageModel: ObservableObject {
          defaults: UserDefaults = .standard) {
         self.historyStore = historyStore
         self.defaults = defaults
+        panelHeightLimit = (defaults.object(forKey: panelHeightLimitKey) as? Double)
+            .flatMap { $0.isFinite ? max(minPanelHeightLimit, CGFloat($0)) : nil }
         snapshotCommand = snapshotArguments(environment: environment)
         fetchExecutable = yeloPath(environment: environment)
     }

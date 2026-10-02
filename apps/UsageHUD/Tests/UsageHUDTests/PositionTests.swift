@@ -59,12 +59,42 @@ final class PositionTests: XCTestCase {
         XCTAssertEqual(rect, CGRect(x: 100, y: 466, width: 800, height: 434))
     }
 
+    func testCardsGoSideBySideOnlyWhenEachGetsItsMinimum() {
+        // Claude with three windows, Codex with one window and the credits column.
+        let mins = [providerCardMinWidth(columns: 3), providerCardMinWidth(columns: 2)]
+        XCTAssertEqual(mins, [552, 426])
+        XCTAssertNil(providerCardWidths(minWidths: mins, total: 991, gap: 14))
+        XCTAssertEqual(providerCardWidths(minWidths: mins, total: 992, gap: 14), [552, 426])
+        // Spare width splits in proportion, so the three-window card stays the wider one.
+        XCTAssertEqual(providerCardWidths(minWidths: mins, total: 1304, gap: 14), [728, 561])
+        XCTAssertNil(providerCardWidths(minWidths: [552], total: 2000, gap: 14))
+    }
+
+    @MainActor
+    func testHeightLimitHasAFloorAndSurvivesANewModel() {
+        let suite = "UsageHUDTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let first = UsageModel(defaults: defaults)
+        XCTAssertNil(first.panelHeightLimit)
+        first.resizePanelHeight(to: 100)
+        XCTAssertEqual(first.panelHeightLimit, minPanelHeightLimit)
+        first.resizePanelHeight(to: 420)
+        first.savePanelHeightLimit()
+
+        XCTAssertEqual(UsageModel(defaults: defaults).panelHeightLimit, 420)
+    }
+
     func testPanelWidthClampsToTheScreen() {
-        XCTAssertEqual(clampedPanelWidth(nil, screenWidth: 1512), 584)
-        XCTAssertEqual(clampedPanelWidth(.nan, screenWidth: 1512), 584)
+        // No saved width: wide enough for the cards side by side.
+        XCTAssertEqual(clampedPanelWidth(nil, screenWidth: 1512), 1100)
+        XCTAssertEqual(clampedPanelWidth(.nan, screenWidth: 1512), 1100)
+        XCTAssertEqual(clampedPanelWidth(nil, screenWidth: 1000), 900)
         XCTAssertEqual(clampedPanelWidth(500, screenWidth: 1512), 584)
         XCTAssertEqual(clampedPanelWidth(700, screenWidth: 1512), 700)
-        XCTAssertEqual(clampedPanelWidth(5000, screenWidth: 1512), 960)
+        // At most 90% of the screen.
+        XCTAssertEqual(clampedPanelWidth(5000, screenWidth: 1512), 1360)
         XCTAssertEqual(clampedPanelWidth(900, screenWidth: 800), 720)
         // A screen too narrow for the maximum still keeps the minimum.
         XCTAssertEqual(clampedPanelWidth(900, screenWidth: 600), 584)
@@ -78,7 +108,7 @@ final class PositionTests: XCTestCase {
 
         let first = UsageModel(defaults: defaults)
         first.applyScreenWidth(1512)
-        XCTAssertEqual(first.panelWidth, 584)
+        XCTAssertEqual(first.panelWidth, 1100)
         first.resizePanel(to: 760)
         first.savePanelWidth()
 

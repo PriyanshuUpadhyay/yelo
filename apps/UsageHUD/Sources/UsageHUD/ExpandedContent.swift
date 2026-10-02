@@ -116,12 +116,17 @@ func accountSubtitle(_ rows: [MeterRow], fetchStatus: String?, now: Date = Date(
 func resetCreditsText(count: Int?, expiries: [Double?]?) -> String? {
     guard let count, count > 0 else { return nil }
     let head = "\(count) \(count == 1 ? "reset" : "resets")"
-    guard let expiries, !expiries.isEmpty else { return head }
+    guard let dates = resetCreditDates(count: count, expiries: expiries) else { return head }
+    return "\(head) · \(count == 1 ? "expires" : "expire") \(dates.joined(separator: ", "))"
+}
+
+private func resetCreditDates(count: Int, expiries: [Double?]?) -> [String]? {
+    guard let expiries, !expiries.isEmpty else { return nil }
     var dates = expiries.map { at in
         at.map { monthDayFormatter.string(from: Date(timeIntervalSince1970: $0)) } ?? "no expiry"
     }
     if dates.count < count { dates.append("…") }
-    return "\(head) · \(count == 1 ? "expires" : "expire") \(dates.joined(separator: ", "))"
+    return dates
 }
 
 /// "resets 14:30" — data-script resets are relative ("4h37m") and humanized from the absolute
@@ -155,6 +160,14 @@ struct DetailLine: Equatable {
     let text: String
     /// The line that carries the severity colour.
     let risk: Bool
+    /// What a narrow column shows instead of `text`.
+    let short: String
+
+    init(text: String, risk: Bool, short: String? = nil) {
+        self.text = text
+        self.risk = risk
+        self.short = short ?? text
+    }
 }
 
 /// The lines under a meter bar. The reset time always shows; a risk adds the run-out time (red)
@@ -174,13 +187,53 @@ func cellDetail(row: MeterRow, pressure: RowPressure?, fetchedAt: Date?, now: Da
         let gapMinutes = minute(fetchedAt.addingTimeInterval(htr * 3600)) - minute(runsOutAt)
         // Same minute on screen: a "0m later" gap says nothing.
         let resetLine = gapMinutes < 1 ? reset : "\(reset) · \(gapLabel(hours: gapMinutes / 60)) later"
-        return [DetailLine(text: "Runs out \(limitTimeLabel(runsOutAt, now: now))", risk: true),
-                DetailLine(text: resetLine, risk: false)]
+        let runsOut = limitTimeLabel(runsOutAt, now: now)
+        return [DetailLine(text: "Runs out \(runsOut)", risk: true, short: "Out \(runsOut)"),
+                DetailLine(text: resetLine, risk: false, short: reset)]
     case .amber:
         guard let projected = pressure.projected else { return plain }
-        return plain + [DetailLine(text: "On pace for \(min(100, Int(projected.rounded())))% by then", risk: true)]
+        let pct = min(100, Int(projected.rounded()))
+        return plain + [DetailLine(text: "On pace for \(pct)% by then", risk: true, short: "\(pct)% by reset")]
     case .green:
         return plain
+    }
+}
+
+/// Side by side when every card gets its minimum width; spare width splits in proportion to the
+/// minimums, so a three-window card stays wider than a two-column one. nil = stack the cards.
+func providerCardWidths(minWidths: [CGFloat], total: CGFloat, gap: CGFloat) -> [CGFloat]? {
+    guard minWidths.count > 1 else { return nil }
+    let gaps = gap * CGFloat(minWidths.count - 1)
+    let needed = minWidths.reduce(0, +)
+    guard total - gaps >= needed else { return nil }
+    return minWidths.map { ($0 * (total - gaps) / needed).rounded(.down) }
+}
+
+/// Card padding, the shortest account column, and one 112 pt meter per column with its spacing.
+func providerCardMinWidth(columns: Int) -> CGFloat { 24 + 150 + CGFloat(columns) * (112 + 14) }
+
+/// The meter windows of one provider in display order, and whether a reset-credits column follows.
+private func providerColumns(_ rows: [MeterRow]) -> (windows: [String], credits: Bool) {
+    let windows = Set(rows.compactMap(\.window)).sorted {
+        windowOrder($0) == windowOrder($1) ? $0 < $1 : windowOrder($0) < windowOrder($1)
+    }
+    return (windows, rows.contains { ($0.resetCredits ?? 0) > 0 })
+}
+
+/// Every account row has this height, whatever its cells hold, so rows line up across cards.
+private let rowContentHeight: CGFloat = 46
+
+/// One line that drops to its short form, then truncates, instead of wrapping to a second line.
+private struct FittedLine: View {
+    let text: String
+    let short: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            Text(text)
+            Text(short)
+        }
+        .lineLimit(1)
     }
 }
 
@@ -248,6 +301,9 @@ private struct MeterCell: View {
     let reduceMotion: Bool
     /// Position in the whole account list — the bars fill in a short cascade rather than all at once.
     let rowIndex: Int
+    /// Too narrow for the risk beside the number: the risk takes the last line, and the reset time
+    /// stays in the tooltip. Running out comes first because it comes sooner.
+    let compact: Bool
 
     private var severity: PresentationSeverity {
         PresentationSeverity(pct: row?.pct ?? 0, pressure: pressure?.pressure)
@@ -268,6 +324,8 @@ private struct MeterCell: View {
     }
 
     var body: some View {
+        let risk = detail.first(where: \.risk)
+        let lastLine = compact ? risk ?? detail.first { !$0.risk } : detail.first { !$0.risk }
         VStack(alignment: .leading, spacing: 4) {
             if let row, let pct = row.pct {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -277,35 +335,81 @@ private struct MeterCell: View {
                         .contentTransition(.numericText())
                         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 1), value: pct)
                         .foregroundStyle(row.isLive ? severity.textColor ?? textPrimary : textPrimary.opacity(0.8))
+                        .fixedSize()
                     if row.isStale {
                         Image(systemName: "clock")
                             .font(.system(size: 8, weight: .medium))
                             .foregroundStyle(textTertiary)
                             .accessibilityLabel("Older sample")
                     }
+                    // The risk sits on the number's line, so a cell at risk is no taller than a calm one.
+                    if let risk, !compact {
+                        Spacer(minLength: 4)
+                        FittedLine(text: risk.text, short: risk.short)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(severity.textColor ?? textSecondary)
+                    }
                 }
                 UsageBarView(pct: pct, start: barColors.start, end: barColors.end,
                              dimmed: !row.isLive, reduceMotion: reduceMotion, rowIndex: rowIndex)
-                // At most one plain and one risk line per cell, so `risk` is a stable, unique id.
-                ForEach(detail, id: \.risk) { line in
-                    Text(line.text)
-                        .font(.system(size: 10, weight: line.risk ? .medium : .regular))
-                        .foregroundStyle(line.risk ? severity.textColor ?? textSecondary : textSecondary)
-                        // Three window columns leave about 105 pt at the default width; wrap
-                        // rather than cut the time off.
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                FittedLine(text: lastLine?.text ?? "", short: lastLine?.short ?? "")
+                    .font(.system(size: 10, weight: lastLine?.risk == true ? .medium : .regular))
+                    .foregroundStyle(lastLine?.risk == true ? severity.textColor ?? textSecondary : textSecondary)
             } else {
                 Text("—").font(.system(size: 17, design: .rounded)).foregroundStyle(textSecondary)
                 Text("No sample").font(.system(size: 10)).foregroundStyle(textSecondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 45, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: rowContentHeight, maxHeight: rowContentHeight, alignment: .topLeading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(row.map { "\(windowLabel($0)), \($0.pct.map { "\($0) percent used" } ?? "No sample")" } ?? "No sample")
-        .accessibilityValue((detail.map(\.text) + [row.flatMap { freshnessDetail($0) } ?? ""]).filter { !$0.isEmpty }.joined(separator: ". "))
-        .help(row.map { freshnessDetail($0) ?? windowLabel($0) } ?? "No local sample for this window")
+        .accessibilityValue(fullLines.joined(separator: ". "))
+        .help(row == nil ? "No local sample for this window"
+              : fullLines.isEmpty ? row.map(windowLabel) ?? "" : fullLines.joined(separator: "\n"))
+    }
+
+    /// A short form can hide the gap or part of a time, so the tooltip always has the full lines.
+    private var fullLines: [String] {
+        detail.map(\.text) + [row.flatMap { freshnessDetail($0) }].compactMap { $0 }
+    }
+}
+
+/// Usage limit resets that ChatGPT granted to a Codex account, in the same three lines as a meter.
+private struct CreditsCell: View {
+    let count: Int?
+    let expiries: [Double?]?
+
+    var body: some View {
+        let count = count ?? 0
+        let dates = resetCreditDates(count: count, expiries: expiries) ?? []
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(count > 0 ? "\(count)" : "—")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(count > 0 ? textPrimary : textSecondary)
+                if count > 0 {
+                    Text(count == 1 ? "reset" : "resets").font(.system(size: 10)).foregroundStyle(textSecondary)
+                }
+            }
+            // One pip per credit stands where a meter has its bar.
+            HStack(spacing: 3) {
+                ForEach(0..<min(count, 8), id: \.self) { _ in
+                    Capsule().fill(codexColor.opacity(0.75)).frame(width: 12, height: 6)
+                }
+            }
+            .frame(height: 6)
+            .accessibilityHidden(true)
+            FittedLine(text: dates.isEmpty ? "" : "\(count == 1 ? "Expires" : "Expire") \(dates.joined(separator: ", "))",
+                       short: dates.first.map { "Next \($0)" } ?? "")
+                .font(.system(size: 10))
+                .foregroundStyle(textSecondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: rowContentHeight, maxHeight: rowContentHeight, alignment: .topLeading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(resetCreditsText(count: count, expiries: expiries) ?? "No limit resets")
+        .help("Usage limit resets that ChatGPT granted to this account. Redeem one in ChatGPT settings."
+              + (resetCreditsText(count: count, expiries: expiries).map { "\n\($0)" } ?? ""))
     }
 }
 
@@ -322,20 +426,25 @@ private struct ProviderSection: View {
     /// Index of this card's first account within the whole list, so the bar cascade runs top to
     /// bottom across cards instead of restarting per provider.
     let rowIndexOffset: Int
-    let accountWidth: CGFloat
+    /// The whole card, padding included.
+    let width: CGFloat
 
     @State private var hoveredLabel: String?
 
     private var accounts: [(label: String, rows: [MeterRow])] { groupedByLabel(rows) }
-    private var windows: [String] {
-        Set(rows.compactMap(\.window)).sorted {
-            windowOrder($0) == windowOrder($1) ? $0 < $1 : windowOrder($0) < windowOrder($1)
-        }
+    private var windows: [String] { providerColumns(rows).windows }
+    private var showsCredits: Bool { providerColumns(rows).credits }
+    /// Names get a little over a quarter of the card; meters take the rest.
+    private var accountWidth: CGFloat { min(220, max(132, (width - 24) * 0.27)) }
+    /// "73%" with "Out Sun 10:41" beside it needs about 120 pt.
+    private var compactCells: Bool {
+        let columns = CGFloat(max(1, windows.count + (showsCredits ? 1 : 0)))
+        return (width - 24 - accountWidth - 14 * columns) / columns < 120
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 18) {
+            HStack(spacing: 14) {
                 HStack(spacing: 7) {
                     Circle().fill(providerColor(provider)).frame(width: 8, height: 8)
                         .accessibilityHidden(true)
@@ -351,13 +460,21 @@ private struct ProviderSection: View {
                         .foregroundStyle(textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if windows.isEmpty { Spacer(minLength: 0) }
+                if showsCredits {
+                    Text("LIMIT RESETS")
+                        .font(.system(size: 10, weight: .medium))
+                        .tracking(0.6)
+                        .foregroundStyle(textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help("Usage limit resets that ChatGPT granted to each account")
+                }
+                if windows.isEmpty && !showsCredits { Spacer(minLength: 0) }
             }
-            .padding(.bottom, 8)
+            .padding(.bottom, 6)
 
             ForEach(Array(accounts.enumerated()), id: \.element.label) { index, account in
                 let subtitle = accountSubtitle(account.rows, fetchStatus: fetchStatuses[account.label])
-                HStack(spacing: 18) {
+                HStack(spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(accountName(label: account.label, provider: provider))
                             .font(.system(size: 12.5, weight: .medium))
@@ -393,20 +510,25 @@ private struct ProviderSection: View {
                     if let unavailable = account.rows.first(where: { $0.state == "offline" || $0.state == "logged_out" }) {
                         Text(availabilityCopy(unavailable))
                             .font(.system(size: 11)).foregroundStyle(textSecondary)
-                            .frame(maxWidth: .infinity, minHeight: 45, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2)
+                            .help(availabilityCopy(unavailable))
+                            .frame(maxWidth: .infinity, minHeight: rowContentHeight, maxHeight: rowContentHeight, alignment: .leading)
                     } else {
                         ForEach(windows, id: \.self) { window in
                             MeterCell(
                                 row: account.rows.first { $0.window == window },
                                 pressure: pressures.first { $0.label == account.label && $0.window == window },
                                 fetchedAt: fetchedAt, reduceMotion: reduceMotion,
-                                rowIndex: rowIndexOffset + index
+                                rowIndex: rowIndexOffset + index, compact: compactCells
                             )
+                        }
+                        if showsCredits {
+                            CreditsCell(count: account.rows.compactMap(\.resetCredits).first,
+                                        expiries: account.rows.compactMap(\.resetCreditsExpireAt).first)
                         }
                     }
                 }
-                .padding(.vertical, 5)
+                .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color.white.opacity(hoveredLabel == account.label ? 0.03 : 0))
@@ -424,24 +546,11 @@ private struct ProviderSection: View {
                             .padding(.horizontal, 8)
                     }
                 }
-                // Full width under the row, so five dates fit on one line. Only Codex rows carry
-                // the keys, and the CLI already sorted and filtered the list.
-                if let credits = resetCreditsText(
-                    count: account.rows.compactMap(\.resetCredits).first,
-                    expiries: account.rows.compactMap(\.resetCreditsExpireAt).first
-                ) {
-                    Text(credits)
-                        .font(.system(size: 10))
-                        .foregroundStyle(textSecondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 5)
-                        .help("Usage limit resets that ChatGPT granted to this account. Redeem one in ChatGPT settings.")
-                }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .frame(width: width)
         .background(RoundedRectangle(cornerRadius: 16).fill(cardInsetColor))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(hairlineColor, lineWidth: 1))
     }
@@ -456,7 +565,11 @@ struct ExpandedContent: View {
     // Keep controls visible while only the account list scrolls.
     private let headerHeight: CGFloat = 72
     private let footerHeight: CGFloat = 40
-    private var availableHeight: CGFloat { min(640, max(0, hudPanelSize.height - model.notchTopInset)) }
+    private let cardGap: CGFloat = 14
+    /// The screen is the ceiling; a height the person set with the bottom edge can lower it.
+    private var availableHeight: CGFloat {
+        min(model.panelHeightLimit ?? .infinity, max(0, hudPanelSize.height - model.notchTopInset))
+    }
     private var visibleHeight: CGFloat { min(naturalHeight > 0 ? naturalHeight + headerHeight + footerHeight : availableHeight, availableHeight) }
     private var accountCount: Int { groupedByLabel(model.rows).count }
     private var hasOlderSamples: Bool { model.rows.contains(where: \.isStale) }
@@ -493,17 +606,29 @@ struct ExpandedContent: View {
                                    detail: "Add a Claude or Codex profile with Yelo.\nUsage appears after you use it.")
                     } else {
                         let sections = providerSections
-                        ForEach(Array(sections.enumerated()), id: \.element.provider) { index, section in
-                            ProviderSection(
-                                provider: section.provider, rows: section.rows, pressures: model.rowPressures,
-                                fetchedAt: model.lastSnapshotAt, reduceMotion: reduceMotion,
-                                fetchStatuses: model.apiFetchResult?.statuses ?? [:],
-                                renewing: model.renewing, onRenew: model.renew,
-                                rowIndexOffset: sections[..<index].reduce(0) { $0 + groupedByLabel($1.rows).count },
-                                // A quarter of any extra width goes to the names; exactly 136 pt at
-                                // the default width, so the default layout does not move.
-                                accountWidth: 136 + (model.panelWidth - minPanelWidth) / 4
-                            )
+                        let contentWidth = model.panelWidth - 56
+                        let widths = providerCardWidths(
+                            minWidths: sections.map {
+                                let columns = providerColumns($0.rows)
+                                return providerCardMinWidth(columns: columns.windows.count + (columns.credits ? 1 : 0))
+                            },
+                            total: contentWidth, gap: cardGap
+                        )
+                        // One layout value, so crossing the threshold moves the cards instead of rebuilding them.
+                        let layout = widths == nil
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: cardGap))
+                            : AnyLayout(HStackLayout(alignment: .top, spacing: cardGap))
+                        layout {
+                            ForEach(Array(sections.enumerated()), id: \.element.provider) { index, section in
+                                ProviderSection(
+                                    provider: section.provider, rows: section.rows, pressures: model.rowPressures,
+                                    fetchedAt: model.lastSnapshotAt, reduceMotion: reduceMotion,
+                                    fetchStatuses: model.apiFetchResult?.statuses ?? [:],
+                                    renewing: model.renewing, onRenew: model.renew,
+                                    rowIndexOffset: sections[..<index].reduce(0) { $0 + groupedByLabel($1.rows).count },
+                                    width: widths?[index] ?? contentWidth
+                                )
+                            }
                         }
                     }
                 }

@@ -3,7 +3,7 @@ import Combine
 import CoreGraphics
 import SwiftUI
 
-/// The expanded panel grows within the screen's visible height. Longer account lists scroll.
+/// The expanded panel grows within the screen's visible height. Only a longer list scrolls.
 func hudPanelHeight(screenHeight: CGFloat) -> CGFloat { max(400, screenHeight - 40) }
 
 /// AppKit panel frame — the max headroom the window can ever occupy; the VISIBLE expanded surface
@@ -16,20 +16,26 @@ func hudPanelHeight(screenHeight: CGFloat) -> CGFloat { max(400, screenHeight - 
 var hudPanelSize = NSSize(width: 624, height: hudPanelHeight(screenHeight: NSScreen.screens.first?.visibleFrame.height ?? 800))
 let fallbackNotchSize = NSSize(width: 224, height: 38)
 let minPanelWidth: CGFloat = 584
+/// Wide enough that the Claude and Codex cards sit side by side (`providerCardWidths`).
+let defaultPanelWidth: CGFloat = 1100
 let panelWidthKey = "panelWidthPoints"
 /// Room around the card inside the window for its shadow.
 let panelWindowMargin: CGFloat = 40
 
-/// Wider than 960 pt the meters turn into thin lines far apart.
+/// Past the side-by-side width, extra width goes to the meter columns.
 func maxPanelWidth(screenWidth: CGFloat) -> CGFloat {
-    max(minPanelWidth, min(960, screenWidth - 80))
+    max(minPanelWidth, (screenWidth * 0.9).rounded(.down))
 }
 
-/// Card width for this screen. nil, NaN, or out-of-range stored values clamp.
+/// Card width for this screen. nil or NaN takes the default; out-of-range values clamp.
 func clampedPanelWidth(_ stored: Double?, screenWidth: CGFloat) -> CGFloat {
-    guard let stored, stored.isFinite else { return minPanelWidth }
-    return min(max(CGFloat(stored), minPanelWidth), maxPanelWidth(screenWidth: screenWidth))
+    let width = stored.flatMap { $0.isFinite ? CGFloat($0) : nil } ?? defaultPanelWidth
+    return min(max(width, minPanelWidth), maxPanelWidth(screenWidth: screenWidth))
 }
+
+/// The bottom edge sets a height limit. Without one, the card fits all accounts up to the screen.
+let minPanelHeightLimit: CGFloat = 240
+let panelHeightLimitKey = "panelHeightLimitPoints"
 let notchHoverHorizontalInset: CGFloat = 8
 let notchHoverBottomInset: CGFloat = 5
 let notchHoverTopInset: CGFloat = 1

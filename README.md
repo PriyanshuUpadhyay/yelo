@@ -139,10 +139,13 @@ The HUD opens at the top of the screen. Move the pointer over the notch to see y
 accounts, or choose **Show usage** from its menu-bar menu. The menu action keeps the
 panel open until you close it. Use **Refresh** or Command-R to run `yelo usage fetch`
 and display the updated usage. Escape closes the panel. Accounts are grouped by provider with shared usage-window
-columns. Long account lists scroll while Refresh and Close stay visible. Drag the left or
-right edge of the panel to make it wider; the HUD keeps that width after a restart. When a
-window will run out before it resets, its cell shows the run-out time and the reset time,
-for example "Runs out 15:20" and "Resets 16:30 · 1h 10m later".
+columns, and every account row has the same height. When the panel is wide enough, the
+Claude and Codex cards sit side by side. Drag the left or right edge of the panel to change
+its width, up to 90% of the screen. Drag the bottom edge to make it shorter; the list then
+scrolls while Refresh and Close stay visible. The HUD keeps both sizes after a restart.
+When a window will run out before it resets, its cell shows the run-out time and the reset
+time, for example "Runs out 15:20" and "Resets 16:30 · 1h 10m later". A narrow column
+shows a shorter form, and the tooltip shows the full text.
 
 The HUD reads local usage files every two minutes and when you open it. These automatic
 reads do not use the network or read credentials. Clicking Refresh requests usage from
