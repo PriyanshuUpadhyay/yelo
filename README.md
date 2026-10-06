@@ -92,6 +92,12 @@ The time fraction has a 2% minimum. Each account uses its highest window score;
 ties prefer more remaining capacity. Accounts with usable capacity take priority
 over exhausted accounts. The normal windows are five hours and seven days.
 
+Each automatic pick is logged in `~/.config/yelo/picks.log` (under `$XDG_CONFIG_HOME`
+when set). An account's score is divided by 1 + its picks in the last 10 minutes,
+so a burst of launches, such as a swarm spawning several panes, spreads across
+accounts in proportion to their scores instead of landing on one. `yelo profile pick`
+run by hand counts as a pick too.
+
 For a Fable startup model, Claude also includes the Fable weekly window and excludes
 accounts with known exhausted Fable usage, even when only one account is signed in.
 If all are exhausted, it stops instead of starting Claude. The startup model comes

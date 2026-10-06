@@ -8,6 +8,7 @@ commit.
 
 | #    | Title                                              | Status   | Date       | Origin          |
 |------|----------------------------------------------------|----------|------------|-----------------|
+| 0020 | Spread a burst of automatic picks across accounts  | accepted | 2026-10-06 | yelo            |
 | 0019 | Put reset credits on the account rows              | accepted | 2026-09-28 | yelo            |
 | 0018 | Rewrite yelo in Rust as one binary             | accepted | 2026-09-27 | yelo            |
 | 0017 | Place swarm panes in the main-grid shape at spawn time | accepted | 2026-09-18 | yelo            |
