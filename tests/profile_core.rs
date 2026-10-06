@@ -144,7 +144,7 @@ const NEAR_EQUAL: [PickCache<'static>; 2] = [
 ];
 
 #[test]
-fn test_burst_of_picks_alternates_between_equal_accounts() {
+fn test_burst_of_picks_alternates_between_close_accounts() {
     let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
     let picked: Vec<_> = (0..4).map(|_| home.name()).collect();
     assert_eq!(picked, ["a", "b", "a", "b"]);
@@ -158,10 +158,29 @@ fn test_pick_older_than_ten_minutes_does_not_count() {
     let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
     home.seed_pick("a", 30);
     assert_eq!(home.name(), "b");
+    // A stamp from a clock that was ahead does not count either.
+    let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
+    home.seed_pick("a", -86400);
+    assert_eq!(home.name(), "a");
 }
 
 #[test]
-fn test_parallel_picks_split_between_equal_accounts() {
+fn test_held_lock_only_disables_the_discount() {
+    let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
+    home.seed_pick("a", 30);
+    let log = fs::File::open(home.temp.root.join(".config/yelo/picks.log")).unwrap();
+    log.lock().unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        scope.spawn(|| sent.send(home.name()).unwrap());
+        let picked = received.recv_timeout(std::time::Duration::from_secs(10));
+        log.unlock().unwrap();
+        assert_eq!(picked.as_deref(), Ok("a"));
+    });
+}
+
+#[test]
+fn test_parallel_picks_split_between_close_accounts() {
     let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
     let mut picked: Vec<_> = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..4).map(|_| scope.spawn(|| home.name())).collect();

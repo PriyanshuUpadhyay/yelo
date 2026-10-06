@@ -786,28 +786,23 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
                 .open(config.join("picks.log"))
         })
         .ok()
-        .filter(|file| file.lock().is_ok());
-    let mut recent = String::new();
+        .filter(lock_briefly);
+    let mut recent = Vec::new();
     if let Some(file) = &mut log {
         let mut text = String::new();
         let _ = file.read_to_string(&mut text);
-        for line in text.lines() {
-            if line
-                .split_once('\t')
-                .and_then(|(stamp, _)| stamp.parse::<i64>().ok())
-                .is_some_and(|stamp| now - stamp < PICK_MEMORY_SECS)
-            {
-                recent.push_str(line);
-                recent.push('\n');
-            }
-        }
-    }
-    let picks = |dir: &str| {
-        recent
+        recent = text
             .lines()
-            .filter(|line| line.split_once('\t').is_some_and(|(_, d)| d == dir))
-            .count() as f64
-    };
+            .filter_map(|line| {
+                let (stamp, dir) = line.split_once('\t')?;
+                let stamp: i64 = stamp.parse().ok()?;
+                (0..PICK_MEMORY_SECS)
+                    .contains(&(now - stamp))
+                    .then(|| (stamp, dir.to_owned()))
+            })
+            .collect();
+    }
+    let picks = |dir: &str| recent.iter().filter(|(_, d)| d == dir).count() as f64;
     if found.len() > 1 {
         let judged: Vec<_> = found
             .iter()
@@ -846,11 +841,15 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
         }
         [row] => {
             if let Some(file) = &mut log {
-                recent.push_str(&format!("{now}\t{}\n", row.dir));
+                recent.push((now, row.dir.clone()));
+                let text: String = recent
+                    .iter()
+                    .map(|(stamp, dir)| format!("{stamp}\t{dir}\n"))
+                    .collect();
                 let _ = file
                     .set_len(0)
                     .and_then(|()| file.rewind())
-                    .and_then(|()| file.write_all(recent.as_bytes()));
+                    .and_then(|()| file.write_all(text.as_bytes()));
             }
             emit_row(row, json);
             0
@@ -859,6 +858,19 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
     }
 }
 const PICK_MEMORY_SECS: i64 = 600;
+// A launch must not hang on a stuck lock holder, so the wait is bounded at about one second.
+fn lock_briefly(file: &fs::File) -> bool {
+    for _ in 0..50 {
+        match file.try_lock() {
+            Ok(()) => return true,
+            Err(fs::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(fs::TryLockError::Error(_)) => return false,
+        }
+    }
+    false
+}
 fn rollout_files(directory: &Path, archived: bool) -> Vec<(String, String, PathBuf)> {
     fn collect(path: &Path, depth: usize, out: &mut Vec<PathBuf>) {
         if depth == 0 {
