@@ -773,20 +773,24 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
     }
     // Launches between two HUD refreshes read the same cache, so each recent automatic pick
     // discounts that account's score. The lock spans read to write, so parallel launches see
-    // each other. A log that cannot be opened or locked only disables the discount.
-    let now = crate::usage::now();
+    // each other. A log that cannot be opened or locked only disables the discount. With no
+    // HOME the path is relative, so the log is skipped instead of landing in the caller's cwd.
     let config = crate::setup::config_dir(&home());
-    let mut log = fs::create_dir_all(&config)
-        .and_then(|()| {
+    let mut log = Some(config.join("picks.log"))
+        .filter(|path| path.is_absolute())
+        .and_then(|path| {
+            fs::create_dir_all(&config).ok()?;
             fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .truncate(false)
-                .open(config.join("picks.log"))
+                .open(path)
+                .ok()
         })
-        .ok()
         .filter(lock_briefly);
+    // Read after the lock, so a stamp that the previous holder just wrote is never in the future.
+    let now = crate::usage::now();
     let mut recent = Vec::new();
     if let Some(file) = &mut log {
         let mut text = String::new();
