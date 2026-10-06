@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 pub(crate) mod manage;
 use std::{
     env, fs,
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -770,6 +771,43 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
             return 1;
         }
     }
+    // Launches between two HUD refreshes read the same cache, so each recent automatic pick
+    // discounts that account's score. The lock spans read to write, so parallel launches see
+    // each other. A log that cannot be opened or locked only disables the discount.
+    let now = crate::usage::now();
+    let config = crate::setup::config_dir(&home());
+    let mut log = fs::create_dir_all(&config)
+        .and_then(|()| {
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(config.join("picks.log"))
+        })
+        .ok()
+        .filter(|file| file.lock().is_ok());
+    let mut recent = String::new();
+    if let Some(file) = &mut log {
+        let mut text = String::new();
+        let _ = file.read_to_string(&mut text);
+        for line in text.lines() {
+            if line
+                .split_once('\t')
+                .and_then(|(stamp, _)| stamp.parse::<i64>().ok())
+                .is_some_and(|stamp| now - stamp < PICK_MEMORY_SECS)
+            {
+                recent.push_str(line);
+                recent.push('\n');
+            }
+        }
+    }
+    let picks = |dir: &str| {
+        recent
+            .lines()
+            .filter(|line| line.split_once('\t').is_some_and(|(_, d)| d == dir))
+            .count() as f64
+    };
     if found.len() > 1 {
         let judged: Vec<_> = found
             .iter()
@@ -788,7 +826,8 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
             .max_by(|a, b| {
                 let rank = |r: &Row| {
                     (
-                        r.urgency.as_ref().and_then(Value::as_f64).unwrap_or(0.0),
+                        r.urgency.as_ref().and_then(Value::as_f64).unwrap_or(0.0)
+                            / (1.0 + picks(&r.dir)),
                         r.remaining.as_ref().and_then(Value::as_i64).unwrap_or(0),
                     )
                 };
@@ -806,12 +845,20 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
             1
         }
         [row] => {
+            if let Some(file) = &mut log {
+                recent.push_str(&format!("{now}\t{}\n", row.dir));
+                let _ = file
+                    .set_len(0)
+                    .and_then(|()| file.rewind())
+                    .and_then(|()| file.write_all(recent.as_bytes()));
+            }
             emit_row(row, json);
             0
         }
         _ => unreachable!(),
     }
 }
+const PICK_MEMORY_SECS: i64 = 600;
 fn rollout_files(directory: &Path, archived: bool) -> Vec<(String, String, PathBuf)> {
     fn collect(path: &Path, depth: usize, out: &mut Vec<PathBuf>) {
         if depth == 0 {

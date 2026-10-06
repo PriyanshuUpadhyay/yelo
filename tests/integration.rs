@@ -207,6 +207,8 @@ fn test_auto_selection_uses_existing_usage_ranking() {
             stderr(&expected)
         );
         let selected: Value = serde_json::from_slice(&expected.stdout).unwrap();
+        // The expected pick is logged and would discount its account; the shell must see the same state.
+        fs::remove_file(installed.home.join(".config/yelo/picks.log")).unwrap();
         let result = installed.run(cli, &[]);
         assert_eq!(result.status.code(), Some(23), "{cli}: {}", stderr(&result));
         assert!(

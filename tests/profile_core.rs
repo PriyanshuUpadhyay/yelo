@@ -83,31 +83,92 @@ fn test_keychain_service_shared() {
 
 type PickCache<'a> = (&'a str, &'a [(&'a str, i64, i64)]);
 
-fn run_pick(caches: &[PickCache<'_>], names: &[&str]) -> Value {
-    let temp = TestHome::new();
-    let root = temp.root.join("profiles");
-    for name in names {
-        mkdir(&root.join(name));
-    }
-    let now = now();
-    for (name, windows) in caches {
-        let mut doc = json!({"ts": now, "fetched_at": now, "source": "api"});
-        for (key, pct, offset) in *windows {
-            doc[*key] = json!({"used_percentage": pct, "resets_at": now + offset});
+struct PickHome {
+    temp: TestHome,
+    env: common::Env,
+}
+
+impl PickHome {
+    fn new(caches: &[PickCache<'_>], names: &[&str]) -> Self {
+        let temp = TestHome::new();
+        let root = temp.root.join("profiles");
+        for name in names {
+            mkdir(&root.join(name));
         }
-        write_json(&root.join(name).join(".usage-api-cache.json"), &doc);
+        let now = now();
+        for (name, windows) in caches {
+            let mut doc = json!({"ts": now, "fetched_at": now, "source": "api"});
+            for (key, pct, offset) in *windows {
+                doc[*key] = json!({"used_percentage": pct, "resets_at": now + offset});
+            }
+            write_json(&root.join(name).join(".usage-api-cache.json"), &doc);
+        }
+        let mut env = fixture_env(&temp.root, common::TRUE_BIN);
+        env.insert(
+            "AGENT_PROFILES_CLAUDE_ROOT".into(),
+            root.display().to_string(),
+        );
+        Self { temp, env }
     }
-    let mut env = fixture_env(&temp.root, common::TRUE_BIN);
-    env.insert(
-        "AGENT_PROFILES_CLAUDE_ROOT".into(),
-        root.display().to_string(),
-    );
-    json_output(&run_yelo(
-        &["profile", "pick", "--cli", "claude", "--json"],
-        &env,
-        None,
-        "",
-    ))
+
+    fn pick(&self) -> Value {
+        json_output(&run_yelo(
+            &["profile", "pick", "--cli", "claude", "--json"],
+            &self.env,
+            None,
+            "",
+        ))
+    }
+
+    fn name(&self) -> String {
+        self.pick()["name"].as_str().unwrap().to_owned()
+    }
+
+    fn seed_pick(&self, name: &str, age: i64) {
+        let dir = self.temp.root.join("profiles").join(name);
+        write(
+            &self.temp.root.join(".config/yelo/picks.log"),
+            &format!("{}\t{}\n", now() - age, dir.display()),
+        );
+    }
+}
+
+fn run_pick(caches: &[PickCache<'_>], names: &[&str]) -> Value {
+    PickHome::new(caches, names).pick()
+}
+
+// a has a slightly better score than b, so a quiet pick takes a and a penalized a loses to b.
+const NEAR_EQUAL: [PickCache<'static>; 2] = [
+    ("a", &[("five_hour", 10, 9000)]),
+    ("b", &[("five_hour", 12, 9000)]),
+];
+
+#[test]
+fn test_burst_of_picks_alternates_between_equal_accounts() {
+    let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
+    let picked: Vec<_> = (0..4).map(|_| home.name()).collect();
+    assert_eq!(picked, ["a", "b", "a", "b"]);
+}
+
+#[test]
+fn test_pick_older_than_ten_minutes_does_not_count() {
+    let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
+    home.seed_pick("a", 601);
+    assert_eq!(home.name(), "a");
+    let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
+    home.seed_pick("a", 30);
+    assert_eq!(home.name(), "b");
+}
+
+#[test]
+fn test_parallel_picks_split_between_equal_accounts() {
+    let home = PickHome::new(&NEAR_EQUAL, &["a", "b"]);
+    let mut picked: Vec<_> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..4).map(|_| scope.spawn(|| home.name())).collect();
+        workers.into_iter().map(|w| w.join().unwrap()).collect()
+    });
+    picked.sort();
+    assert_eq!(picked, ["a", "a", "b", "b"]);
 }
 
 #[test]
