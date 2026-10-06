@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 pub(crate) mod manage;
 use std::{
     env, fs,
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -770,6 +771,42 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
             return 1;
         }
     }
+    // Launches between two HUD refreshes read the same cache, so each recent automatic pick
+    // discounts that account's score. The lock spans read to write, so parallel launches see
+    // each other. A log that cannot be opened or locked only disables the discount. With no
+    // HOME the path is relative, so the log is skipped instead of landing in the caller's cwd.
+    let config = crate::setup::config_dir(&home());
+    let mut log = Some(config.join("picks.log"))
+        .filter(|path| path.is_absolute())
+        .and_then(|path| {
+            fs::create_dir_all(&config).ok()?;
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(path)
+                .ok()
+        })
+        .filter(lock_briefly);
+    // Read after the lock, so a stamp that the previous holder just wrote is never in the future.
+    let now = crate::usage::now();
+    let mut recent = Vec::new();
+    if let Some(file) = &mut log {
+        let mut text = String::new();
+        let _ = file.read_to_string(&mut text);
+        recent = text
+            .lines()
+            .filter_map(|line| {
+                let (stamp, dir) = line.split_once('\t')?;
+                let stamp: i64 = stamp.parse().ok()?;
+                (0..PICK_MEMORY_SECS)
+                    .contains(&(now - stamp))
+                    .then(|| (stamp, dir.to_owned()))
+            })
+            .collect();
+    }
+    let picks = |dir: &str| recent.iter().filter(|(_, d)| d == dir).count() as f64;
     if found.len() > 1 {
         let judged: Vec<_> = found
             .iter()
@@ -788,7 +825,8 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
             .max_by(|a, b| {
                 let rank = |r: &Row| {
                     (
-                        r.urgency.as_ref().and_then(Value::as_f64).unwrap_or(0.0),
+                        r.urgency.as_ref().and_then(Value::as_f64).unwrap_or(0.0)
+                            / (1.0 + picks(&r.dir)),
                         r.remaining.as_ref().and_then(Value::as_i64).unwrap_or(0),
                     )
                 };
@@ -806,11 +844,36 @@ fn command_pick(cli: &str, json: bool, args: &[String]) -> i32 {
             1
         }
         [row] => {
+            if let Some(file) = &mut log {
+                recent.push((now, row.dir.clone()));
+                let text: String = recent
+                    .iter()
+                    .map(|(stamp, dir)| format!("{stamp}\t{dir}\n"))
+                    .collect();
+                let _ = file
+                    .set_len(0)
+                    .and_then(|()| file.rewind())
+                    .and_then(|()| file.write_all(text.as_bytes()));
+            }
             emit_row(row, json);
             0
         }
         _ => unreachable!(),
     }
+}
+const PICK_MEMORY_SECS: i64 = 600;
+// A launch must not hang on a stuck lock holder, so the wait is bounded at about one second.
+fn lock_briefly(file: &fs::File) -> bool {
+    for _ in 0..50 {
+        match file.try_lock() {
+            Ok(()) => return true,
+            Err(fs::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(fs::TryLockError::Error(_)) => return false,
+        }
+    }
+    false
 }
 fn rollout_files(directory: &Path, archived: bool) -> Vec<(String, String, PathBuf)> {
     fn collect(path: &Path, depth: usize, out: &mut Vec<PathBuf>) {

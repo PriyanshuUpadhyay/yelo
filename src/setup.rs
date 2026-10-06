@@ -256,13 +256,16 @@ fn orphans(home: &Path, wanted: &[(PathBuf, String)]) -> Vec<PathBuf> {
         .collect()
 }
 
-fn shell_path(home: &Path) -> PathBuf {
+pub(crate) fn config_dir(home: &Path) -> PathBuf {
     env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"))
-        .join("yelo/shell.sh")
+        .join("yelo")
+}
+fn shell_path(home: &Path) -> PathBuf {
+    config_dir(home).join("shell.sh")
 }
 
 fn shell_text() -> &'static str {
